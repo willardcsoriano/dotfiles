@@ -1,44 +1,48 @@
 # dotfiles
 
-Personal Linux config files. Tested on Debian Trixie XFCE. Should work on any Debian/Ubuntu-based distro using libinput.
-
-## Install
+My personal Linux config files for Debian/Ubuntu XFCE. One command to reproduce my setup on any machine.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/dotfiles/main/install.sh | sh
 ```
 
-No git required. Settings apply immediately — no logout needed.
+No git required. Changes apply immediately — no logout needed.
 
-## Why
-
-Touchpad physical click mechanisms wear out over time. Tap-to-click lets you tap the surface instead of pressing down, which means the hardware lasts much longer. Max speed is also set so the cursor feels snappy from the moment you log in.
+---
 
 ## What's included
 
-- Touchpad tap-to-click (no physical clicking needed, saves hardware)
-- Touchpad max acceleration speed
-- Auto-detects your touchpad device — no hardcoded IDs or property numbers
+### Touchpad
+
+Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, meaning you have to physically press the pad down every time. This fixes both.
+
+- **Tap-to-click** — tap the surface instead of pressing down, which also saves the click mechanism from wearing out
+- **Max acceleration speed** — cursor feels snappy from first login
+- Auto-detects your touchpad — no hardcoded device IDs, works across hardware
+
+---
 
 ## Requirements
 
-- Debian/Ubuntu-based distro
-- X11
+- Debian/Ubuntu-based distro, X11
 - `curl` (pre-installed on most distros)
 - `xinput` (installed automatically if missing)
 
 ## How it works
 
-- `install.sh` fetches everything directly from GitHub — no git clone needed
-- `/etc/X11/Xsession.d/99-touchpad-tap` runs at X session start before the desktop loads
-- `bashrc.append` is appended to `~/.bashrc` as a fallback every time a terminal opens
-- Both scripts auto-detect your touchpad so they work across different hardware
+`install.sh` pulls files directly from GitHub and puts them in the right places:
 
-## Manual restore
+| File | What it does |
+|------|-------------|
+| `/etc/X11/Xsession.d/99-touchpad-tap` | Runs at every X login, before the desktop loads |
+| `~/.bashrc` append | Fallback — reapplies settings on every new terminal |
 
-```sh
-sudo curl -fsSL https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/dotfiles/main/xsession.d/99-touchpad-tap \
-    -o /etc/X11/Xsession.d/99-touchpad-tap
-sudo chmod +x /etc/X11/Xsession.d/99-touchpad-tap
-curl -fsSL https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/dotfiles/main/bashrc.append >> ~/.bashrc
-```
+Both are auto-detecting scripts — they find your touchpad by name, not by ID, so they work regardless of distro or touchpad brand.
+
+## Adding more configs
+
+This repo is meant to grow. To add a new config:
+
+1. Drop the file or script in a logical folder
+2. Add an install step to `install.sh`
+3. Document it here under a new section
