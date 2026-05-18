@@ -1,6 +1,6 @@
 ## Overview
 
-My personal Linux config files for Debian/Ubuntu XFCE. One command to reproduce my setup on any machine — no git required. The configs target the driver level where possible, so settings survive login, hibernate/resume, and device name changes (e.g. bcm5974 → keyd after wake). Currently covers touchpad behaviour; the repo is structured to grow as more configs are added.
+My personal Linux config files for Debian/Ubuntu XFCE. One command to reproduce my setup on any machine — no git required. The configs target the driver level where possible, so settings survive login, hibernate/resume, and device name changes (e.g. bcm5974 → keyd after wake). On MacBooks, the bcm5974 USB touchpad re-enumerates on lid open, and XFCE's settings daemon can disable it mid-reconnect — a systemd sleep hook and xfconf fix are included to handle that. Currently covers touchpad behaviour; the repo is structured to grow as more configs are added.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/willardcsoriano/dotfiles/master/install.sh | sh
@@ -26,8 +26,10 @@ Settings take effect on next login.
 Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, meaning you have to physically press the pad down every time. This fixes both.
 
 - **Tap-to-click** — tap the surface instead of pressing down, which also saves the click mechanism from wearing out
+- **Natural scrolling** — scroll direction matches touchpad gesture
 - **Max acceleration speed** — cursor feels snappy from first login
 - Configured at the libinput driver level — persists across hibernate/resume, not just login
+- Includes a fix for XFCE's settings daemon disabling the trackpad after lid open on MacBooks (bcm5974 USB re-enumeration bug)
 
 ---
 
@@ -42,9 +44,10 @@ Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, 
 
 | File | What it does |
 |------|-------------|
-| `/etc/X11/xorg.conf.d/40-libinput-touchpad.conf` | Configures libinput at driver level — applies on every X start and survives hibernate |
+| `/etc/X11/xorg.conf.d/40-libinput-touchpad.conf` | Configures libinput at driver level — applies on every X start and device reconnect |
+| `/etc/systemd/system-sleep/touchpad-resume` | Re-enables the touchpad 2s after resume, in case xfsettingsd disables it during reconnect |
 
-Settings live at the driver level, not in a login-time script, so there's nothing to re-run after resume.
+`install.sh` also runs `xfconf-query` to fix XFCE storing `Device_Enabled=0` for the trackpad — the root cause of the touchpad going dead after lid open on MacBooks.
 
 ## Adding more configs
 
