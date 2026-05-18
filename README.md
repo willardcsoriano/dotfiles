@@ -3,10 +3,10 @@
 My personal Linux config files for Debian/Ubuntu XFCE. One command to reproduce my setup on any machine — no git required. The configs target the driver level where possible, so settings survive login, hibernate/resume, and device name changes (e.g. bcm5974 → keyd after wake). On MacBooks, the bcm5974 USB touchpad re-enumerates on lid open, and XFCE's settings daemon can disable it mid-reconnect — a systemd sleep hook and xfconf fix are included to handle that. Currently covers touchpad behaviour; the repo is structured to grow as more configs are added.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/willardcsoriano/dotfiles/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/willardcsoriano/dotfiles/v0.1.0/install.sh | sh
 ```
 
-Settings take effect on next login.
+Settings apply immediately — no logout needed.
 
 ---
 
