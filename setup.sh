@@ -6,16 +6,8 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 echo "Installing touchpad settings..."
 
-sudo cp "$SCRIPT_DIR/xsession.d/99-touchpad-tap" /etc/X11/Xsession.d/
+sudo mkdir -p /etc/X11/xorg.conf.d
 
-sudo chmod +x /etc/X11/Xsession.d/99-touchpad-tap
+sudo cp "$SCRIPT_DIR/xorg.conf.d/40-libinput-touchpad.conf" /etc/X11/xorg.conf.d/
 
-echo "Applying bashrc additions..."
-
-if ! grep -q "touchpad tap-to-click" ~/.bashrc; then
-
-    cat "$SCRIPT_DIR/bashrc.append" >> ~/.bashrc
-
-fi
-
-echo "Done. Log out and back in to apply all settings."
+echo "Done. Log out and back in to apply touchpad settings."

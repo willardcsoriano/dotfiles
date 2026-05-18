@@ -1,14 +1,23 @@
-# dotfiles
+## Overview
 
-My personal Linux config files for Debian/Ubuntu XFCE. One command to reproduce my setup on any machine.
+My personal Linux config files for Debian/Ubuntu XFCE. One command to reproduce my setup on any machine — no git required. The configs target the driver level where possible, so settings survive login, hibernate/resume, and device name changes (e.g. bcm5974 → keyd after wake). Currently covers touchpad behaviour; the repo is structured to grow as more configs are added.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/dotfiles/main/install.sh | sh
 ```
 
-No git required. Changes apply immediately — no logout needed.
+Settings take effect on next login.
 
 ---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [What's included](#whats-included)
+  - [Touchpad](#touchpad)
+- [Requirements](#requirements)
+- [How it works](#how-it-works)
+- [Adding more configs](#adding-more-configs)
 
 ## What's included
 
@@ -18,15 +27,14 @@ Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, 
 
 - **Tap-to-click** — tap the surface instead of pressing down, which also saves the click mechanism from wearing out
 - **Max acceleration speed** — cursor feels snappy from first login
-- Auto-detects your touchpad — no hardcoded device IDs, works across hardware
+- Configured at the libinput driver level — persists across hibernate/resume, not just login
 
 ---
 
 ## Requirements
 
-- Debian/Ubuntu-based distro, X11
+- Debian/Ubuntu-based distro, X11 with libinput driver
 - `curl` (pre-installed on most distros)
-- `xinput` (installed automatically if missing)
 
 ## How it works
 
@@ -34,10 +42,9 @@ Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, 
 
 | File | What it does |
 |------|-------------|
-| `/etc/X11/Xsession.d/99-touchpad-tap` | Runs at every X login, before the desktop loads |
-| `~/.bashrc` append | Fallback — reapplies settings on every new terminal |
+| `/etc/X11/xorg.conf.d/40-libinput-touchpad.conf` | Configures libinput at driver level — applies on every X start and survives hibernate |
 
-Both are auto-detecting scripts — they find your touchpad by name, not by ID, so they work regardless of distro or touchpad brand.
+Settings live at the driver level, not in a login-time script, so there's nothing to re-run after resume.
 
 ## Adding more configs
 
