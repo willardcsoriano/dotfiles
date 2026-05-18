@@ -2,7 +2,8 @@
 
 set -e
 
-REPO_RAW="https://raw.githubusercontent.com/willardcsoriano/dotfiles/master"
+VERSION="v0.1.0"
+REPO_RAW="https://raw.githubusercontent.com/willardcsoriano/dotfiles/$VERSION"
 
 # Require Debian/Ubuntu
 if ! command -v apt-get > /dev/null 2>&1; then
