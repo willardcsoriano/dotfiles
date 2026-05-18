@@ -40,7 +40,7 @@ Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, 
 
 ## How it works
 
-`install.sh` pulls files directly from GitHub and puts them in the right places:
+`install.sh` pulls files directly from GitHub (pinned to the release tag) and puts them in the right places:
 
 | File | What it does |
 |------|-------------|
