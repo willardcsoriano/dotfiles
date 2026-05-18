@@ -3,7 +3,7 @@
 My personal Linux config files for Debian/Ubuntu XFCE. One command to reproduce my setup on any machine — no git required. The configs target the driver level where possible, so settings survive login, hibernate/resume, and device name changes (e.g. bcm5974 → keyd after wake). Currently covers touchpad behaviour; the repo is structured to grow as more configs are added.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/willardcsoriano/dotfiles/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/willardcsoriano/dotfiles/master/install.sh | sh
 ```
 
 Settings take effect on next login.
