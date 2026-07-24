@@ -2,63 +2,86 @@
 
 ## Overview
 
-This is the concrete, ordered list of steps to run the next time SSH to the `dev` VM hangs at the banner exchange — before rebooting anything. Every prior incident ended in a full reboot, which erases the exact evidence (process state, memory, kernel logs, connection tables) needed to tell apart the three hypotheses in [`analysis.md`](analysis.md). Running these steps takes a few minutes and turns the next incident from "reboot and hope" into an actual root-cause diagnosis. All of this is read-only observation except the one explicitly marked restart step, so there's no risk in running it fully even under time pressure.
+This is the concrete, ordered list of steps to run the next time SSH to the `dev` VM hangs at the banner exchange. It replaces an earlier version of this runbook that assumed the Hetzner out-of-band VNC console would be available — it wasn't, during the 2026-07-24 incident, so this version is based on what actually worked instead: the `hcloud` CLI plus a `journalctl -b -1` read taken immediately after recovery. That combination is how the Docker/OOM crash-restart cascade in [`analysis.md`](analysis.md) was found, without ever needing the console. All of Steps 1-2 are read-only or reversible; Steps 3-4 are the actual restart escalation, used only after Steps 1-2 don't resolve it.
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Step 0 — Get in without going through the broken network path](#step-0-get-in-without-going-through-the-broken-network-path)
-- [Step 1 — Capture evidence, in this order](#step-1-capture-evidence-in-this-order)
-- [Step 2 — The single most informative test](#step-2-the-single-most-informative-test)
-- [Step 3 — Record it](#step-3-record-it)
+- [Step 1 — Confirm `hcloud` is pointed at the right project](#step-1-confirm-hcloud-is-pointed-at-the-right-project)
+- [Step 2 — Pull metrics before touching anything](#step-2-pull-metrics-before-touching-anything)
+- [Step 3 — Try the cheap, non-destructive options first](#step-3-try-the-cheap-non-destructive-options-first)
+- [Step 4 — Escalate: soft reboot, then hard reset](#step-4-escalate-soft-reboot-then-hard-reset)
+- [Step 5 — The moment SSH comes back, capture the previous boot's logs](#step-5-the-moment-ssh-comes-back-capture-the-previous-boots-logs)
+- [Step 6 — Record it](#step-6-record-it)
 
-## Step 0 — Get in without going through the broken network path
+## Step 1 — Confirm `hcloud` is pointed at the right project
 
-Regular SSH won't work — that's the whole problem. Use Hetzner's **out-of-band console** instead (Cloud Console → the VM → "Console" / VNC or serial console). This logs in locally on the VM and does not depend on the network stack or `sshd` being healthy, so it works even while SSH is completely dead.
-
-## Step 1 — Capture evidence, in this order
-
-Run each of these and save the output (copy-paste into a scratch file, or a phone photo of the console if nothing else is available) before touching anything:
+The `dev` server does not live under the default/active `hcloud` context on this laptop — it's under a separate project. Check and switch if needed:
 
 ```bash
-systemctl status ssh                                      # is it even "active (running)"?
-ps auxf | grep -i ssh                                      # zombie/defunct (Z) children piling up?
-ss -tnp state all '( sport = :22 )'                         # connections stuck in the kernel accept queue?
-free -h                                                     # memory exhausted?
-df -h                                                       # disk full?
-cat /proc/sys/net/netfilter/nf_conntrack_count
-cat /proc/sys/net/netfilter/nf_conntrack_max                # conntrack table full?
-dmesg -T | tail -100                                        # OOM killer, fork failures, conntrack drops
+hcloud context list          # look for the context that isn't marked active
+hcloud context use willard-mba15
+hcloud server list -o columns=id,name,status,ipv4   # confirm "dev" shows up here
 ```
 
-What each answers, per the ranked hypotheses in `analysis.md`:
+## Step 2 — Pull metrics before touching anything
 
-| Command | Confirms | Rules out |
-|---|---|---|
-| `ps auxf` shows many `Z` (defunct) `sshd` children | Hypothesis 1 (resource exhaustion / churn) | — |
-| `nf_conntrack_count` at/near `nf_conntrack_max` | Hypothesis 2 (conntrack exhaustion) | — |
-| `dmesg` shows `nf_conntrack: table full` | Hypothesis 2 | — |
-| `free -h` near-zero available, or `dmesg` shows OOM killer activity | Hypothesis 3 (memory exhaustion) | — |
-| `df -h` shows a full filesystem | Hypothesis 3 (disk exhaustion) | — |
-| None of the above look abnormal, but `systemctl status ssh` shows it's not "active" | A different failure than any hypothesis above — capture full `systemctl status ssh -l` and `journalctl -u ssh --since "-1 hour"` | — |
-
-## Step 2 — The single most informative test
-
-**Before rebooting the whole VM**, try restarting just the SSH service from the console:
+This is read-only, needs no VM access, and is the single most useful diagnostic step — it's what actually found the 2026-07-24 cascade:
 
 ```bash
-sudo systemctl restart ssh
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+start=$(date -u -d '12 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+for t in cpu network disk; do
+  hcloud server metrics dev --type "$t" --start "$start" --end "$now" -o json > "/tmp/metrics_$t.json"
+done
 ```
 
-Then, from another machine, try connecting again:
+Look at the last 20-30 samples of each (CPU, disk bandwidth, network bandwidth/pps). What to look for, based on what was actually found last time:
+
+- **Sustained (not bursty) CPU and/or disk-read spike, with network flat** → an internal process (very likely Docker again — check `docker.service` and `docker ps -a` the moment SSH is back) is pegging the VM. This is exactly what happened on 2026-07-24.
+- **A spike in network in/pps.in correlating with the outage** → points back toward the original connection-churn theory (`MaxStartups`, `nf_conntrack`) instead — see the superseded hypotheses in `analysis.md`, which would become relevant again if the evidence actually looks like this next time.
+- **Nothing abnormal in any metric** → the cascade this time isn't resource-based; go straight to Step 5 once back in, and check `journalctl -b -1` broadly rather than starting from the Docker angle.
+
+## Step 3 — Try the cheap, non-destructive options first
 
 ```bash
-nc 178.104.35.30 22
+hcloud server reset-password dev
 ```
 
-- **If this alone fixes it:** the problem is scoped to `sshd`/userspace (hypothesis 1). A full VM reboot was never necessary — this is the fix going forward, and the real work becomes finding out why connections pile up rather than getting reaped.
-- **If this does NOT fix it, and only a full VM reboot does:** the problem is system/kernel-scoped (hypothesis 2 or 3). Look specifically at whatever `nf_conntrack_count`, `free -h`, and `dmesg` showed in Step 1.
+This resets the root password live, via `qemu-guest-agent`, with **no reboot** — if it succeeds, the guest is at least partially responsive and you may be able to get in without restarting at all. If it fails with `guest_agent_unavailable`, that itself is useful evidence: the guest is too starved/wedged to service even this side-channel request (this is what happened on 2026-07-24, consistent with the severe CPU/disk pressure found in Step 2).
 
-## Step 3 — Record it
+## Step 4 — Escalate: soft reboot, then hard reset
 
-Append the captured output and which hypothesis it points to into [`timeline.md`](timeline.md) as a new dated entry, and update [`configs.md`](configs.md) if any config was touched. Once a hypothesis is confirmed, the actual permanent fix (a `sysctl` tune for conntrack, a systemd resource limit, a memory/disk increase, or a fix to whatever leaves unauthenticated connections unreaped) should replace the guesswork in `analysis.md` with a confirmed root cause.
+```bash
+hcloud server reboot dev   # soft ACPI reboot — try this first
+```
+
+Wait ~30-60s, then re-check the metrics from Step 2 (or just try SSH). **If the CPU/disk anomaly continues unchanged, the soft reboot did not take effect** — a wedged guest can fail to honor a graceful ACPI signal, which is what happened on 2026-07-24. Escalate:
+
+```bash
+hcloud server reset dev   # hard power-cycle — use if the soft reboot had no effect
+```
+
+This is more abrupt (equivalent to yanking power) and can risk filesystem inconsistency if writes were in flight — check the Step 2 metrics for `disk.*.bandwidth.write` levels before doing this if there's time; on 2026-07-24 write levels were normal throughout (only reads were elevated), which made this an acceptable risk.
+
+## Step 5 — The moment SSH comes back, capture the previous boot's logs
+
+This is time-sensitive — don't do anything else first. `journalctl` only keeps a limited number of past boots, and the whole point is to read the boot that just ended, before it rotates out:
+
+```bash
+ssh dev 'journalctl --list-boots'
+# then, using the boot index for the one that just ended (e.g. -1):
+ssh dev 'journalctl -b -1 --since "<a few minutes before the outage started>" --no-pager'
+```
+
+Also worth checking immediately, given what turned up last time:
+
+```bash
+ssh dev 'free -h; systemctl --user status docker.service --no-pager -l; docker ps -a'
+```
+
+If the journal shows Docker health-check failures, OOM-killer activity, or a `docker.service` restart loop, that's the same cascade as 2026-07-24 — go straight to the fixes listed in `analysis.md` (swap, health-check resilience, memory limits) rather than re-diagnosing from scratch. If it shows something else entirely, this is a new failure mode — document it as a new entry, don't force-fit it into the existing analysis.
+
+## Step 6 — Record it
+
+Append what was found into [`timeline.md`](timeline.md) as a new dated entry, and update [`configs.md`](configs.md) / [`analysis.md`](analysis.md) if anything changed or was newly confirmed. If this turns out to be the same Docker/OOM cascade recurring, that itself is important information: it means the fixes listed in `analysis.md` still haven't been implemented, and should stop being optional.
