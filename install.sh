@@ -31,6 +31,29 @@ if command -v xfconf-query > /dev/null 2>&1; then
     xfconf-query -c pointers -p /bcm5974/Properties/Device_Enabled -t int -s 1 2>/dev/null || true
 fi
 
+# Merge VS Code Remote-SSH keep-alive settings into the user's settings.json,
+# preserving whatever else is already there.
+echo "Configuring VS Code Remote-SSH keep-alives..."
+VSCODE_SETTINGS="$HOME/.config/Code/User/settings.json"
+mkdir -p "$(dirname "$VSCODE_SETTINGS")"
+[ -f "$VSCODE_SETTINGS" ] || echo '{}' > "$VSCODE_SETTINGS"
+if command -v python3 > /dev/null 2>&1; then
+    NEW_SETTINGS=$(curl -fsSL "$REPO_RAW/vscode/settings.json")
+    python3 - "$VSCODE_SETTINGS" "$NEW_SETTINGS" <<'PY'
+import json, sys
+path, new_raw = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    existing = json.load(f)
+existing.update(json.loads(new_raw))
+with open(path, "w") as f:
+    json.dump(existing, f, indent=4)
+    f.write("\n")
+PY
+    echo "Done. VS Code will use the new Remote-SSH settings next time it connects."
+else
+    echo "Skipped: python3 not found, could not safely merge VS Code settings.json."
+fi
+
 # Apply to current session immediately via xinput
 if command -v xinput > /dev/null 2>&1; then
     TOUCHPAD_ID=$(xinput list | grep -i -E "touchpad|bcm5974|trackpad" | grep -o 'id=[0-9]*' | grep -o '[0-9]*' | head -1)

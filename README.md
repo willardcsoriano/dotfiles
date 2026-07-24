@@ -15,6 +15,7 @@ Settings apply immediately — no logout needed.
 - [Overview](#overview)
 - [What's included](#whats-included)
   - [Touchpad](#touchpad)
+  - [VS Code Remote-SSH](#vs-code-remote-ssh)
 - [Requirements](#requirements)
 - [How it works](#how-it-works)
 - [Adding more configs](#adding-more-configs)
@@ -31,12 +32,21 @@ Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, 
 - Configured at the libinput driver level — persists across hibernate/resume, not just login
 - Includes a fix for XFCE's settings daemon disabling the trackpad after lid open on MacBooks (bcm5974 USB re-enumeration bug)
 
+### VS Code Remote-SSH
+
+Turns on VS Code's own reconnect handling for Remote-SSH sessions instead of leaving it on defaults.
+
+- **Connect timeout raised to 15s** — `remote.SSH.connectTimeout` gives slow or waking remote hosts enough time to answer before VS Code gives up
+- **Local server enabled** — `remote.SSH.useLocalServer` lets VS Code manage a local proxy process for cleaner reconnects
+- Merged into `~/.config/Code/User/settings.json` without touching your other settings
+
 ---
 
 ## Requirements
 
 - Debian/Ubuntu-based distro, X11 with libinput driver
 - `curl` (pre-installed on most distros)
+- `python3` (only needed for the VS Code settings merge; skipped with a warning if absent)
 
 ## How it works
 
@@ -48,6 +58,8 @@ Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, 
 | `/etc/systemd/system-sleep/touchpad-resume` | Re-enables the touchpad 2s after resume, in case xfsettingsd disables it during reconnect |
 
 `install.sh` also runs `xfconf-query` to fix XFCE storing `Device_Enabled=0` for the trackpad — the root cause of the touchpad going dead after lid open on MacBooks.
+
+For `vscode/settings.json`, `install.sh` doesn't overwrite the destination file — it merges the two keys into your existing `~/.config/Code/User/settings.json` via `python3`, leaving any other settings you already have in place.
 
 ## Adding more configs
 

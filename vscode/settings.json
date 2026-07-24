@@ -1,0 +1,4 @@
+{
+    "remote.SSH.connectTimeout": 15,
+    "remote.SSH.useLocalServer": true
+}
