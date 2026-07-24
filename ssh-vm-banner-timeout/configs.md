@@ -2,7 +2,7 @@
 
 ## Overview
 
-This captures the before/present state of every configuration file and service that was changed while chasing this issue, so the exact starting point can be restored or referenced if a future fix needs to be compared against the original baseline. Nothing here has been verified to be the actual cause — these are the changes made during attempts 1-4 (see [`timeline.md`](timeline.md)), none of which resolved the issue. Keep this file updated any time one of these configs is touched again, including during the diagnostic steps in [`runbook.md`](runbook.md), so there's always an accurate record of what the system currently looks like versus what it looked like when the issue first appeared.
+This captures the before/present state of every configuration file and service that was changed while chasing this issue, so the exact starting point can be restored or referenced if a future fix needs to be compared against the original baseline. Nothing here has been verified to be the actual cause — these are the changes made across the attempts recorded in [`timeline.md`](timeline.md), none of which resolved the underlying issue (one, the `IPQoS` line, turned out to be a syntax bug that broke the client outright, fixed separately from the VM problem). Keep this file updated any time one of these configs is touched again, including during the diagnostic steps in [`runbook.md`](runbook.md), so there's always an accurate record of what the system currently looks like versus what it looked like when the issue first appeared.
 
 ## Table of Contents
 
@@ -73,16 +73,18 @@ Host *
     ServerAliveInterval 10
     ServerAliveCountMax 3
     ConnectTimeout 5
-    IPQoS 0x00
+    IPQoS 0
 ```
 
-Multiplexing (`ControlMaster`/`ControlPath`/`ControlPersist`) has been completely removed, not just disabled.
+Multiplexing (`ControlMaster`/`ControlPath`/`ControlPersist`) has been completely removed, not just disabled. In between the original baseline and this present state, `ControlPath` was actually changed twice more first (`~/.ssh/cm-%r@%h:%p` → `~/.ssh/cm-%h`) while multiplexing was still enabled, chasing a stale-socket bug, before the decision was made to drop multiplexing entirely — see `timeline.md` attempt 3.
+
+`IPQoS` was originally set to `0x00` (invalid syntax — OpenSSH rejects the hex-prefixed form outright, which broke the SSH client entirely, for every host, not just `dev`). Fixed to the valid decimal form `IPQoS 0` on 2026-07-24. See `timeline.md` ("Self-inflicted regression") and `analysis.md` for why the underlying theory behind this line was technically unsound to begin with; it's left in place only because it's harmless, not because it's believed to matter.
 
 ## 4. Client: `~/.bashrc`
 
 **Before:** A custom `fix-ssh` alias that aggressively `pkill`ed SSH processes and deleted `~/.ssh/cm-*` control socket files.
 
-**Present:** Alias removed entirely, since there are no more control sockets to clean up. The background `ssh-agent` startup script is unchanged and still present.
+**Present:** Alias removed entirely, since there are no more control sockets to clean up. The background `ssh-agent` startup block had been left duplicated (the same `if ! pgrep -u "$USER" ssh-agent ...` guard appeared twice, plus a dangling comment header for the removed alias) from repeated `cat <<EOF >> ~/.bashrc` appends during the troubleshooting session — harmless, but cleaned up (deduplicated) on 2026-07-24.
 
 ## 5. Client: removed systemd SSH proxy config
 
