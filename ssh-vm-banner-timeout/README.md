@@ -12,9 +12,10 @@ This documents an incident on the `dev` VM (Hetzner, `178.104.35.30`, Debian 13)
 
 ## Contents
 
+- [`rca.md`](rca.md) — **the fastest way to see what happened.** Formal root-cause-analysis writeup: incident summary, timeline, five-whys, contributing factors, and a corrective-actions checklist (done vs. recommended) in one page.
 - [`timeline.md`](timeline.md) — chronological log of every fix attempted, the theory behind each, and why it failed, ending with the live diagnosis that found the real cause. Read this before trying anything new, so it isn't repeated.
 - [`configs.md`](configs.md) — before/present snapshots of every config file touched (`sshd_config`, systemd unit state, client `~/.ssh/config`, `~/.bashrc`).
-- [`analysis.md`](analysis.md) — **start here.** The confirmed cascade mechanism, the evidence behind it, what's *not* yet confirmed (the initial trigger, and whether this explains the earlier incidents too), and what's still left to actually fix (swap, container health-check resilience, memory limits).
+- [`analysis.md`](analysis.md) — the confirmed cascade mechanism in full technical detail, what's *not* yet confirmed (the initial trigger, and whether this explains the earlier incidents too), and what's still left to actually fix (swap, container health-check resilience, memory limits).
 - [`runbook.md`](runbook.md) — the out-of-band diagnostic steps that worked (via `hcloud` CLI, no console needed) — reusable if this or a similar issue recurs.
 
 ## The one rule that matters
