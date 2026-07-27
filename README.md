@@ -16,6 +16,7 @@ Settings apply immediately — no logout needed.
 - [What's included](#whats-included)
   - [Touchpad](#touchpad)
   - [VS Code Remote-SSH](#vs-code-remote-ssh)
+  - [Microsoft Teams (optional)](#microsoft-teams-optional)
 - [Requirements](#requirements)
 - [How it works](#how-it-works)
 - [Adding more configs](#adding-more-configs)
@@ -39,6 +40,19 @@ Turns on VS Code's own reconnect handling for Remote-SSH sessions instead of lea
 - **Connect timeout raised to 15s** — `remote.SSH.connectTimeout` gives slow or waking remote hosts enough time to answer before VS Code gives up
 - **Local server enabled** — `remote.SSH.useLocalServer` lets VS Code manage a local proxy process for cleaner reconnects
 - Merged into `~/.config/Code/User/settings.json` without touching your other settings
+
+### Microsoft Teams (optional)
+
+`scripts/install-teams-for-linux.sh` installs the unofficial [`teams-for-linux`](https://github.com/IsmaelMartinez/teams-for-linux) Electron client via its own apt repo, since Microsoft ships no native Debian package.
+
+- Idempotent — skips if already installed
+- Detects architecture automatically (`dpkg --print-architecture`) instead of hardcoding `amd64`
+- Adds `repo.teamsforlinux.de` as a dedicated apt source with its own signing key, so future `apt upgrade` keeps it current
+- Run separately from `install.sh`, since it installs a full application rather than restoring a config file:
+  ```sh
+  bash scripts/install-teams-for-linux.sh
+  ```
+- If sign-in fails right after install with an account-locked message, see [`notes/teams-for-linux-account-lockout.md`](notes/teams-for-linux-account-lockout.md) — it's Entra ID Smart Lockout, not a problem with the client or script
 
 ---
 
