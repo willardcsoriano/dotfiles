@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Root cause confirmed on 2026-07-24** — see the section immediately below. The short version: this was never an `sshd`/SSH-layer problem at all. A rootless Docker daemon crash-restart loop, triggered by an SSH disconnect, got OOM-killed and then repeatedly failed to clean up after itself, pegging the VM at 600-800% CPU and ~1GB/s disk reads for over an hour and starving everything else on the box — including `sshd`. The rest of this file is kept as the historical record of the three hypotheses considered before that evidence came in (all pointed at "some kind of resource exhaustion," which turned out to be correct in spirit, just not in the specific mechanism).
+**Root cause confirmed on 2026-07-24, and confirmed again with a second, distinct trigger on 2026-07-28** — see the section immediately below. The short version: this was never an `sshd`/SSH-layer problem at all. Both times, memory pressure from an unbounded container triggered the kernel OOM killer, which took out the rootless `docker.service` and starved the whole VM's CPU/disk I/O — including `sshd` — for long enough to produce the banner-exchange timeout. The specific trigger differed each time (July 24: two Postgres containers' health checks failing mid-cascade, initial cause unconfirmed; July 28: a Laravel dev container, `wfmctrading-app-1`, whose PHP-FPM worker had run unrecycled for ~53 hours, confirmed directly from the container's own error log) — but the systemic gap enabling both is the same: **no memory ceiling anywhere on this VM**, at the container, cgroup, or systemd level. The rest of this file is kept as the historical record of the three hypotheses considered before the July 24 evidence came in (all pointed at "some kind of resource exhaustion," which turned out to be correct in spirit, just not in the specific mechanism). See `timeline.md`'s "Recurrence (2026-07-28)" section for the full second-incident writeup.
 
 ## Table of Contents
 
@@ -16,6 +16,7 @@
   - [3. Memory or disk exhaustion](#3-memory-or-disk-exhaustion)
 - [Why "just reboot" always "fixed" it — and why that's misleading](#why-just-reboot-always-fixed-it-and-why-thats-misleading)
 - [Confirmed evidence: the failure is not client- or network-path-dependent](#confirmed-evidence-the-failure-is-not-client--or-network-path-dependent)
+- [Worst-case blast radius: could this destroy the VM?](#worst-case-blast-radius-could-this-destroy-the-vm)
 - [A note on secondary troubleshooting sources](#a-note-on-secondary-troubleshooting-sources)
 
 ## Root cause (confirmed 2026-07-24)
@@ -47,12 +48,13 @@ Also unverified: **whether this exact Docker/OOM/crash-loop mechanism explains t
 
 **What to actually fix, going forward:**
 
-- [x] **Add swap.** Done 2026-07-24: 4GB swapfile (`/swapfile`), persisted in `/etc/fstab`, `vm.swappiness=10`. Confirmed live: `free -h` shows `Swap: 4.0Gi` total, `0B` used.
+- [x] **Add swap.** Done 2026-07-24: 4GB swapfile (`/swapfile`), persisted in `/etc/fstab`, `vm.swappiness=10`. Confirmed live: `free -h` shows `Swap: 4.0Gi` total, `0B` used. **Note (2026-07-28): swap alone did not prevent a recurrence** — the July 28 incident was a genuine OOM under real memory pressure, not the health-check-restart-loop mechanism swap was meant to cushion. Swap helps but isn't sufficient on its own; the per-container limits below are the actual fix.
 - [x] **Prune the long tail of months-old exited containers.** Done 2026-07-24: removed all 24 `erpnext-distribution-*` and `frappe_docker-*` containers (2-8 weeks old, none referenced by anything active). Left `wfmctrading-*` and `ollama` alone — those had only exited 3-5 days prior, too recent to assume they're dead weight rather than intentionally stopped.
 - [ ] Avoid piling up many concurrent VS Code Remote-SSH windows against this VM at once (each window runs its own `vscode-server` + extension-host tree) — or, if that workflow is needed, size the VM's RAM/swap with that concurrency in mind rather than for a single-window baseline.
 - [ ] Confirm the trigger directly next time: capture `ps aux --sort=-%mem` or a live `netdata` per-process memory view *during* an incident (not after, since that data can't be reconstructed once the VM is rebooted) to see whether `vscode-server` processes are in fact the top memory consumers when it happens.
 - [ ] Make the health-check/restart behavior more resilient — e.g. increase `pg_isready`'s timeout/retries so a brief resource blip doesn't immediately cascade into container restarts, and/or use `on-failure` with a backoff instead of `unless-stopped` so a bad container can't restart-loop indefinitely.
-- [ ] Consider a memory limit (`--memory` / `deploy.resources.limits.memory` in compose) on the containers involved, so one bad container can't take down the whole daemon via OOM.
+- [x] **Per-container memory limits — done for `wfmctrading` (2026-07-28):** `mem_limit: 2g` (app, `mem_reservation: 512m`), `256m` (nginx), `1g` (postgres) added to `~/repos/wfmctrading/docker-compose.yml` directly on the VM (uncommitted — that's a separate repo, not managed here). Verified against live Docker Compose source (via Context7) that `mem_limit` is enforced by plain `docker compose up` on the installed v5.3.1, not Swarm-only. **Still open for every other stack on the box** — `turtley`, `bodego`, `erpnext-scaffold`, `odoo-scaffold` all remain unbounded; any of them could reproduce the same failure.
+- [ ] **New (2026-07-28): recycle long-lived PHP-FPM workers.** `wfmctrading`'s php-fpm pool never sets `pm.max_requests` (disabled by default in the stock `php:8.4-fpm` image), so worker processes are never recycled — one was confirmed alive for ~53 hours before its OOM kill. `mem_limit` bounds the damage if this happens again; `pm.max_requests` (recommend 300-500) addresses why a worker's RSS can grow unbounded in the first place. Recommended, not yet applied.
 - [ ] Optional further cleanup: `docker system df` shows ~7.4GB of unused images and ~8.8GB of reclaimable build cache — safe to clear (`docker image prune -a`, `docker builder prune`) but not done, since it wasn't part of the original fix list and would mean slower rebuilds next time those layers are needed.
 
 ## What "TCP completes, no banner, forever" actually means
@@ -95,6 +97,18 @@ A full reboot resets PIDs, clears memory pressure, and flushes the `nf_conntrack
 ## Confirmed evidence: the failure is not client- or network-path-dependent
 
 Attempt 5 in [`timeline.md`](timeline.md) — retrying from a mobile carrier hotspot instead of home Wi-Fi — failed identically. That's a meaningful data point: it rules out CGNAT/IP-roaming and any home-IP-specific ban or rate-limit, since the hotspot uses a completely different public IP and network path. Combined with the `nc` evidence (a non-SSH client fails the same way), this leaves no remaining plausible client-side or network-path explanation — the three hypotheses above (all server/VM-side) are the only ones left standing.
+
+## Worst-case blast radius: could this destroy the VM?
+
+Raised directly by the user after the 2026-07-28 recurrence, worth answering plainly since it shapes how urgently the remaining fixes (memory limits on the other stacks, health-check resilience) should be prioritized.
+
+**What actually happens, confirmed both times:** the VM becomes fully unresponsive and needs a hard power-cycle (`hcloud server reset`) to recover. That's disruptive, but not destructive on its own — in both incidents, disk **write** I/O stayed at baseline throughout (it was reads that spiked, from the crash-restart cascade re-reading container/image layers), and no data loss or corruption has been observed after either recovery. A hard reset does not "destroy" a Hetzner Cloud VM — the disk, image, and IP all persist independent of the guest OS's state.
+
+**The real risk this setup carries, not yet hit but genuinely open:** `bodego-postgres` and `turtley-db-1` run continuously in the background on this same VM, independent of whatever triggers the next OOM cascade. A hard power-cycle is not a clean shutdown — if a future reset happens to land mid-write to one of those databases, recovery depends on Postgres's WAL crash-recovery and the VM's filesystem journaling (ext4) both doing their job. Both are normally reliable, but "normally reliable" is not "guaranteed" — an unlucky-timed hard reset is the actual worst-case exposure here, not the VM itself being destroyed, but one of those databases coming back up corrupted.
+
+**What would make it meaningfully worse than anything observed so far:** if a runaway container ever filled the disk (rather than just spiking CPU/read I/O, which is all that's happened in both diagnosed incidents), that could corrupt whatever else is mid-write at the same time — logs, configs, or database files — independent of any hard reset. Neither incident's trigger was disk-fill-based, but it's the next rung up in severity if a future cause ever is.
+
+**Bottom line:** this failure mode can take the VM offline and force a disruptive recovery, and repeatedly forcing hard resets carries real (if so-far-unrealized) risk to the always-on Postgres containers' data — but it has not shown any sign of being able to destroy the VM outright or cause irreversible data loss in either occurrence so far. This is the strongest concrete argument for finishing the `mem_limit` rollout on `turtley`, `bodego`, and the other stacks (see the fix checklist above) rather than treating the `wfmctrading`-only fix as sufficient.
 
 ## A note on secondary troubleshooting sources
 
