@@ -17,6 +17,8 @@ This documents a recurring incident on the `dev` VM (Hetzner, `178.104.35.30`, D
 - [`configs.md`](configs.md) — before/present snapshots of every config file touched (`sshd_config`, systemd unit state, client `~/.ssh/config`, `~/.bashrc`).
 - [`analysis.md`](analysis.md) — the confirmed cascade mechanism in full technical detail, what's *not* yet confirmed (the initial trigger, and whether this explains the earlier incidents too), and what's still left to actually fix (swap, container health-check resilience, memory limits).
 - [`runbook.md`](runbook.md) — the out-of-band diagnostic steps that worked (via `hcloud` CLI, no console needed) — reusable if this or a similar issue recurs.
+- [`self-healing.md`](self-healing.md) — follow-up safeguards (crash-restart loop guard, memory ceiling, `netdata` alerting, client-side hardening, a scheduled `vscode-server` reaper) and the incident log for the separate VS Code Remote-SSH reconnect-storm failure mode these were built for.
+- [`setup-alerting-and-memory-ceiling.md`](setup-alerting-and-memory-ceiling.md) — copy-paste checklist for the pieces of `self-healing.md` that need `sudo` on `dev`.
 
 ## The one rule that matters
 
