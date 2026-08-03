@@ -54,6 +54,18 @@ else
     echo "Skipped: python3 not found, could not safely merge VS Code settings.json."
 fi
 
+# Install the fix-ssh utility (cleans up stale ControlMaster sockets left
+# behind by a bad disconnect; `fix-ssh --vscode [host]` also force-kills
+# orphaned vscode-server sessions on a remote host) so it's runnable as a
+# bare command.
+echo "Installing fix-ssh to \$HOME/.local/bin..."
+mkdir -p "$HOME/.local/bin"
+curl -fsSL "$REPO_RAW/scripts/fix-ssh.sh" -o "$HOME/.local/bin/fix-ssh"
+chmod +x "$HOME/.local/bin/fix-ssh"
+if ! command -v fix-ssh > /dev/null 2>&1; then
+    echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'fix-ssh' directly, or run \$HOME/.local/bin/fix-ssh."
+fi
+
 # Apply to current session immediately via xinput
 if command -v xinput > /dev/null 2>&1; then
     TOUCHPAD_ID=$(xinput list | grep -i -E "touchpad|bcm5974|trackpad" | grep -o 'id=[0-9]*' | grep -o '[0-9]*' | head -1)
