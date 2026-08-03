@@ -12,6 +12,8 @@ This captures the before/present state of every configuration file and service t
 - [3. Client: `~/.ssh/config`](#3-client-sshconfig)
 - [4. Client: `~/.bashrc`](#4-client-bashrc)
 - [5. Client: removed systemd SSH proxy config](#5-client-removed-systemd-ssh-proxy-config)
+- [6. Server: `~/repos/wfmctrading/docker-compose.yml` (2026-07-28)](#6-server-reposwfmctradingdocker-composeyml-2026-07-28)
+- [7. Server: `vscode-server-reap` timer (2026-07-29)](#7-server-vscode-server-reap-timer-2026-07-29)
 - [Not yet checked (see `runbook.md`)](#not-yet-checked-see-runbookmd)
 
 ## 1. Server: `/etc/ssh/sshd_config`
@@ -90,12 +92,76 @@ Multiplexing (`ControlMaster`/`ControlPath`/`ControlPersist`) has been completel
 
 `/etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf` — deleted during attempt 4. No replacement added.
 
+## 6. Server: `~/repos/wfmctrading/docker-compose.yml` (2026-07-28)
+
+Not an SSH/network config — a Docker Compose file on the VM, changed after the 2026-07-28 recurrence traced back to this specific project's containers having no memory ceiling. See `timeline.md`'s "Recurrence (2026-07-28)" section for the full diagnosis.
+
+**Before:** no `mem_limit` on any of the three services (`app`, `nginx`, `postgres`) — unbounded.
+
+**Present:**
+
+```yaml
+services:
+  app:
+    # ...unchanged...
+    mem_limit: 2g
+    mem_reservation: 512m
+
+  nginx:
+    # ...unchanged...
+    mem_limit: 256m
+
+  postgres:
+    # ...unchanged...
+    mem_limit: 1g
+```
+
+Applied directly on the VM via SSH and validated with `docker compose config`. **Left uncommitted** — `wfmctrading` is a separate, independently git-tracked repo not managed by this dotfiles repo or session; committing it there is the user's call.
+
+**Also identified but not yet fixed:** `~/repos/wfmctrading/Dockerfile` never sets `pm.max_requests` on the php-fpm pool (disabled by default in the stock `php:8.4-fpm` image), so workers are never recycled — confirmed responsible for the July 28 incident (a worker alive ~53 hours). Recommended fix: add `pm.max_requests = 300` (or similar) to the pool config, e.g. via a second `sed` line in the Dockerfile alongside the existing one that sets `user`/`group` in `www.conf`, or a dedicated pool `.conf` snippet in `/usr/local/etc/php-fpm.d/`.
+
+## 7. Server: `vscode-server-reap` timer (2026-07-29)
+
+Not present before. Added after the 2026-07-29 confirmed incident (see `self-healing.md`'s "Confirmed occurrence" section) where six orphaned `vscode-server` sessions, accumulated over ~19-24 hours across a wifi drop and a client auto-update, exhausted swap and blocked new Remote-SSH connections.
+
+**Present:**
+
+```bash
+# /usr/local/bin/reap-vscode-server.sh — see ssh-vm-banner-timeout/reap-vscode-server.sh for full source
+```
+
+```ini
+# /etc/systemd/system/vscode-server-reap.service
+[Unit]
+Description=Reap orphaned vscode-server sessions older than 24h
+
+[Service]
+Type=oneshot
+User=willard
+ExecStart=/usr/local/bin/reap-vscode-server.sh
+```
+
+```ini
+# /etc/systemd/system/vscode-server-reap.timer
+[Unit]
+Description=Run vscode-server-reap.service every 6 hours
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
 ## Not yet checked (see `runbook.md`)
 
-None of the following have been inspected yet, and any of them could be the actual root cause per [`analysis.md`](analysis.md):
+The `nf_conntrack`/firewall items below were never inspected because the root cause turned out to be memory/process-starvation-based both times this issue was actually diagnosed (2026-07-24 and 2026-07-28) — they remain untested theories, not ruled out, only superseded by a confirmed cause each time:
 
 - `nf_conntrack_max` / current conntrack table usage on the server
-- Server memory (`free -h`) and disk (`df -h`) at the time of failure
 - Zombie/defunct `sshd` child processes at the time of failure
 - `dmesg` output from the server at the time of failure
 - Hetzner Cloud Firewall rules attached to the VM (if any)
+
+Server memory (`free -h`) and disk I/O **have** been checked, both times (see `analysis.md` and `rca.md`) — removed from this list since they're no longer unchecked.
