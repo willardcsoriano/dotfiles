@@ -96,6 +96,8 @@ Verified both branches live: a real master connection was correctly left alone; 
 
 **Confirmed effective against a second, different symptom (2026-08-05):** not just orphaned-tree pileup — also fixes a wedged agent host that's still serving an existing connection but stuck handshaking new ones. See [`incident-2026-08-05-vscode-agent-host-wedge.md`](incident-2026-08-05-vscode-agent-host-wedge.md).
 
+**Expect a brief load spike right after running `--vscode`, not a sign of a new problem:** force-killing a whole process tree at once (extension host, language servers, etc.) causes a short, sharp CPU/reclaim burst on `dev` — observed as a decaying 15-minute load average shortly after the 2026-08-05 fix, with the 1-minute average already back to normal by the time it was checked. Give it a few minutes to settle before treating elevated load as a separate incident.
+
 ### 6. Server-side: `vscode-server-reap` timer
 
 **Status: written 2026-07-29, not actually deployed until confirmed otherwise.** The script and unit files were committed to this repo but never copied to `dev` or registered with systemd — a gap only discovered on 2026-08-03 when the exact failure mode recurred untouched (see [`incident-2026-08-03-vscode-server-pileup.md`](incident-2026-08-03-vscode-server-pileup.md)). The install command below was handed to the user on 2026-08-03; **do not treat this item as done until it's re-verified live on `dev`** (`systemctl list-timers vscode-server-reap.timer`).
