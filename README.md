@@ -16,6 +16,7 @@ Settings apply immediately — no logout needed.
 - [What's included](#whats-included)
   - [Touchpad](#touchpad)
   - [VS Code Remote-SSH](#vs-code-remote-ssh)
+  - [Troubleshooting aliases](#troubleshooting-aliases)
   - [Microsoft Teams (optional)](#microsoft-teams-optional)
 - [Requirements](#requirements)
 - [How it works](#how-it-works)
@@ -40,6 +41,13 @@ Turns on VS Code's own reconnect handling for Remote-SSH sessions instead of lea
 - **Connect timeout raised to 15s** — `remote.SSH.connectTimeout` gives slow or waking remote hosts enough time to answer before VS Code gives up
 - **Local server enabled** — `remote.SSH.useLocalServer` lets VS Code manage a local proxy process for cleaner reconnects
 - Merged into `~/.config/Code/User/settings.json` without touching your other settings
+
+### Troubleshooting aliases
+
+Installed to `~/.local/bin/fix-ssh` — try these before reaching for anything heavier when a remote connection is acting up:
+
+- **`fix-ssh`** — cleans up stale local `ControlMaster` sockets left behind by a bad disconnect. Safe to run reflexively: it only ever removes a socket after confirming its master connection is actually dead (`ssh -O check`), so it won't touch a live one.
+- **`fix-ssh --vscode [host]`** (default host: `dev`) — force-kills every `vscode-server` process on the given remote host and lets a fresh one spawn on reconnect. Not safe in the same way as the bare form — it drops any currently-connected window too, not just orphaned ones, since there's no remote-side way to tell the difference. Reach for this when VS Code Remote-SSH won't reconnect, a new window won't connect while an existing one still works, or memory looks pinned by piled-up `vscode-server` processes. See `ssh-vm-banner-timeout/self-healing.md` for the incidents this covers.
 
 ### Microsoft Teams (optional)
 
