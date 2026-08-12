@@ -30,8 +30,16 @@ set -euo pipefail
 kill_remote_vscode_server() {
     local host="${1:-dev}"
     echo "Killing vscode-server processes on $host..."
+    # The [.] (not \.) is deliberate: pkill -f matches against the FULL
+    # command line, including the invoking shell's own — since this whole
+    # script is passed to the remote as one argument, a literal "\." here
+    # would make the pattern match itself and kill its own parent shell
+    # mid-script, silently truncating everything after it. "[.]" matches
+    # the same processes but breaks the self-match, since the invoking
+    # shell's own argv contains "[.]vscode-server/", not the contiguous
+    # ".vscode-server/" the pattern is actually searching for.
     ssh -o ControlPath=none "$host" '
-      pkill -9 -f "\.vscode-server/" || true
+      pkill -9 -f "[.]vscode-server/" || true
       find /tmp/user/1000 -maxdepth 1 -name "code-*" -type s -delete 2>/dev/null || true
       echo "Done."
     '
