@@ -97,6 +97,8 @@ Verified both branches live: a real master connection was correctly left alone; 
 
 **Confirmed effective against a second, different symptom (2026-08-05):** not just orphaned-tree pileup — also fixes a wedged agent host that's still serving an existing connection but stuck handshaking new ones. See [`incident-2026-08-05-vscode-agent-host-wedge.md`](incident-2026-08-05-vscode-agent-host-wedge.md).
 
+**Fixed 2026-08-12: self-kill bug in the remote kill command.** `pkill -9 -f "\.vscode-server/"` matched not just its intended targets but the full command line of its own invoking shell (the whole 3-line remote script is passed to `ssh` as one argument, and that argument's text contains the same pattern it's searching for) — since the invoking shell's PID is always the newest/highest of the matched set, `pkill`'s numeric-order kill sequence took out the real targets first and its own parent last, silently truncating the script before `find`/`echo "Done."` ever ran. Fixed by switching the pattern to `"[.]vscode-server/"` (same bracket trick used to self-exclude `ps`/`grep` from their own output) — verified live with `pgrep` (non-destructive) that the parent shell no longer matches while every real target still does. See [`incident-2026-08-12-company-wifi-blocked-dev.md`](incident-2026-08-12-company-wifi-blocked-dev.md) for the full diagnosis.
+
 **Expect a brief load spike right after running `--vscode`, not a sign of a new problem:** force-killing a whole process tree at once (extension host, language servers, etc.) causes a short, sharp CPU/reclaim burst on `dev` — observed as a decaying 15-minute load average shortly after the 2026-08-05 fix, with the 1-minute average already back to normal by the time it was checked. Give it a few minutes to settle before treating elevated load as a separate incident.
 
 ### 6. Server-side: `vscode-server-reap` timer
@@ -117,7 +119,6 @@ Unit files: [`vscode-server-reap.service`](vscode-server-reap.service), [`vscode
 
 ## What's still open
 
-- **`fix-ssh --vscode`'s remote `pkill -9 -f "\.vscode-server/"` can self-kill its own invoking shell mid-script**, since the pattern text matches the full command line ssh passes to the remote — silently truncating the script before its cleanup/completion output runs. Fix identified (bracket trick: `"[.]vscode-server/"`) but not yet applied. See [`incident-2026-08-12-company-wifi-blocked-dev.md`](incident-2026-08-12-company-wifi-blocked-dev.md).
 - **Not actually deployed:** item #6 above (`vscode-server-reap` timer) — written 2026-07-29, confirmed *not* live on `dev` as of 2026-08-03. Install command is in item 6; re-verify with `systemctl list-timers vscode-server-reap.timer` after running it.
 - **Deferred by choice:** item #2 above (`netdata` email alerting) — skipped for now, command block kept in `setup-alerting-and-memory-ceiling.md` for later.
 - **Applied and verified:** item #3 above (host memory ceiling) — done 2026-07-29.

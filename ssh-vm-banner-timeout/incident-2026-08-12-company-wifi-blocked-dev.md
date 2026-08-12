@@ -10,7 +10,7 @@ On 2026-08-12, VS Code Remote-SSH against `dev` failed even after running `fix-s
 - [What happened](#what-happened)
 - [Diagnosis: two symptoms, two different causes](#diagnosis-two-symptoms-two-different-causes)
 - [Root cause: company Wi-Fi egress filtering, not `dev`](#root-cause-company-wi-fi-egress-filtering-not-dev)
-- [Related finding, not yet fixed: `fix-ssh --vscode` can self-kill mid-script](#related-finding-not-yet-fixed-fix-ssh---vscode-can-self-kill-mid-script)
+- [Related finding, fixed same day: `fix-ssh --vscode` could self-kill mid-script](#related-finding-fixed-same-day-fix-ssh---vscode-could-self-kill-mid-script)
 - [Fix](#fix)
 - [Open items](#open-items)
 
@@ -42,7 +42,7 @@ Best-fit hypothesis: an egress firewall doing IP-reputation/ASN-based filtering.
 
 A secondary, unconfirmed possibility: SSH's `-D` dynamic port forwarding (which VS Code Remote-SSH's local proxy relies on) is independently a common DLP red flag, since it's a standard way to tunnel out of a locked-down network — plausible as an additional layer on top of the ASN block, though `dev:443` failing too suggests the ASN-level block is the primary mechanism either way.
 
-## Related finding, not yet fixed: `fix-ssh --vscode` can self-kill mid-script
+## Related finding, fixed same day: `fix-ssh --vscode` could self-kill mid-script
 
 While re-running the kill to verify it actually took effect, found the likely explanation for two separate "it printed nothing / didn't seem to finish" reports (this incident and one weeks earlier): `scripts/fix-ssh.sh`'s remote command is
 
@@ -52,7 +52,9 @@ pkill -9 -f "\.vscode-server/"
 
 `pkill -f` matches against a process's **full command line**. Because the entire remote script (including this literal pattern text) is passed to the remote shell as a single argument over `ssh`, the invoking shell's own command line contains the substring `.vscode-server/` too — so `pkill -f` can match and kill its own parent shell mid-script, before it ever reaches the `find` cleanup or `echo "Done."` lines. That would produce exactly the observed symptom: real target processes get killed (confirmed working via `pgrep` in both incidents), but the script appears to end silently with no completion output.
 
-The standard fix is the same bracket trick used for self-excluding `ps`/`grep`/`pkill` from its own output: change the pattern to `"[.]vscode-server/"`. This preserves identical matching against real target processes (still requires a literal `.` followed by `vscode-server/`) while breaking the literal substring match against the invoking shell's own argv (which now contains `[.]vscode-server/`, not the contiguous `.vscode-server/`). **Not yet applied** — diagnosis was interrupted to focus on the live network outage.
+The standard fix is the same bracket trick used for self-excluding `ps`/`grep`/`pkill` from its own output: change the pattern to `"[.]vscode-server/"`. This preserves identical matching against real target processes (still requires a literal `.` followed by `vscode-server/`) while breaking the literal substring match against the invoking shell's own argv (which now contains `[.]vscode-server/`, not the contiguous `.vscode-server/`).
+
+**Applied and verified same day.** Reproduced the exact 3-line script shape with `pgrep` (non-destructive) instead of `pkill`: the old pattern matched the invoking `bash -c` parent alongside every real target, and that parent's PID was the highest in the matched set — consistent with `pkill`'s numeric-order kill sequence hitting real targets first and its own parent last, which is why the targets always died successfully but the script's own completion output never printed. With the new pattern, the same reproduction showed zero matches against the parent shell while still matching every real target. Installed live to `~/.local/bin/fix-ssh` and committed to `scripts/fix-ssh.sh`.
 
 ## Fix
 
@@ -60,6 +62,5 @@ None needed on `dev` or in the tooling — switching off the company Wi-Fi to a 
 
 ## Open items
 
-- **Patch the `fix-ssh --vscode` self-kill bug** described above (`scripts/fix-ssh.sh`, bracket-trick fix identified, not yet applied).
 - **The `ptyHost`-wedge symptom** (new terminals hanging on `"Waiting for subshell to start"` while existing ones keep working) was never independently confirmed fixed on its own — the network issue arrived before that could be verified in isolation. If it recurs with `dev` otherwise healthy and the network ruled out first, treat it as the same family as the 2026-08-05 agent-host wedge and reach for `fix-ssh --vscode dev`.
 - **No lasting mitigation exists for the company-Wi-Fi filtering itself** — it's a network policy outside this repo's control. If this network is used regularly, a Tailscale/WireGuard tunnel to `dev` would likely route around it (traffic would look like an overlay-network connection rather than a raw connection to a flagged Hetzner IP), but that's a real architectural change, not something to do reactively mid-incident.
