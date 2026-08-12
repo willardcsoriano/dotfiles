@@ -25,6 +25,7 @@ Full write-ups live in their own files, one per incident, so this document stays
 - [`incident-2026-07-29-vscode-reconnect-storm.md`](incident-2026-07-29-vscode-reconnect-storm.md) — first confirmed occurrence: a mid-outage VS Code client auto-update forced a version-mismatched reconnect, orphaning six `vscode-server` trees over ~24h until swap and the memory ceiling were exhausted.
 - [`incident-2026-08-03-vscode-server-pileup.md`](incident-2026-08-03-vscode-server-pileup.md) — recurrence: the reaper documented in item 6 below had never actually been deployed to `dev`, so the same failure happened again; also found that a live remediation SSH session can itself drop mid-command during the sharpest moment of memory reclaim.
 - [`incident-2026-08-05-vscode-agent-host-wedge.md`](incident-2026-08-05-vscode-agent-host-wedge.md) — different shape: `dev` was fully healthy, but a 2-day-old agent host wedged on handshaking *new* connections while continuing to serve an already-open window. `fix-ssh --vscode dev` fixed it; root cause of the wedge itself is unconfirmed.
+- [`incident-2026-08-12-company-wifi-blocked-dev.md`](incident-2026-08-12-company-wifi-blocked-dev.md) — not a `dev`-side problem at all: a company Wi-Fi network was selectively blocking TCP to `dev`'s IP on every port (likely ASN/IP-reputation-based egress filtering), while ICMP and other hosts worked fine. Switching networks fixed it. Also surfaced an unpatched `pkill -f` self-kill bug in `fix-ssh --vscode` — see "What's still open" below.
 
 ## What's now in place
 
@@ -116,6 +117,7 @@ Unit files: [`vscode-server-reap.service`](vscode-server-reap.service), [`vscode
 
 ## What's still open
 
+- **`fix-ssh --vscode`'s remote `pkill -9 -f "\.vscode-server/"` can self-kill its own invoking shell mid-script**, since the pattern text matches the full command line ssh passes to the remote — silently truncating the script before its cleanup/completion output runs. Fix identified (bracket trick: `"[.]vscode-server/"`) but not yet applied. See [`incident-2026-08-12-company-wifi-blocked-dev.md`](incident-2026-08-12-company-wifi-blocked-dev.md).
 - **Not actually deployed:** item #6 above (`vscode-server-reap` timer) — written 2026-07-29, confirmed *not* live on `dev` as of 2026-08-03. Install command is in item 6; re-verify with `systemctl list-timers vscode-server-reap.timer` after running it.
 - **Deferred by choice:** item #2 above (`netdata` email alerting) — skipped for now, command block kept in `setup-alerting-and-memory-ceiling.md` for later.
 - **Applied and verified:** item #3 above (host memory ceiling) — done 2026-07-29.
