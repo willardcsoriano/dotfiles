@@ -24,6 +24,7 @@ Full write-ups live in their own files, one per incident, so this document stays
 
 - [`incident-2026-07-29-vscode-reconnect-storm.md`](incident-2026-07-29-vscode-reconnect-storm.md) — first confirmed occurrence: a mid-outage VS Code client auto-update forced a version-mismatched reconnect, orphaning six `vscode-server` trees over ~24h until swap and the memory ceiling were exhausted.
 - [`incident-2026-08-03-vscode-server-pileup.md`](incident-2026-08-03-vscode-server-pileup.md) — recurrence: the reaper documented in item 6 below had never actually been deployed to `dev`, so the same failure happened again; also found that a live remediation SSH session can itself drop mid-command during the sharpest moment of memory reclaim.
+- [`incident-2026-08-05-vscode-agent-host-wedge.md`](incident-2026-08-05-vscode-agent-host-wedge.md) — different shape: `dev` was fully healthy, but a 2-day-old agent host wedged on handshaking *new* connections while continuing to serve an already-open window. `fix-ssh --vscode dev` fixed it; root cause of the wedge itself is unconfirmed.
 
 ## What's now in place
 
@@ -92,6 +93,10 @@ done
 Verified both branches live: a real master connection was correctly left alone; a separately-created master was killed (`kill -9`) to orphan its socket, and `fix-ssh` correctly detected and removed it.
 
 **Extended 2026-08-03:** added a `--vscode [host]` flag (default host: `dev`) that force-kills every `vscode-server` process tree on the remote — the terminal equivalent of VS Code's own "Kill VS Code Server on Host" (command-palette-only, requires closing the connection first, has open reliability bugs). Kept behind an explicit flag rather than folded into the default behavior: unlike the socket cleanup above, it's destructive to a *live* session too, not just an orphaned one, since there's no remote-side way to tell the difference. See [`incident-2026-08-03-vscode-server-pileup.md`](incident-2026-08-03-vscode-server-pileup.md).
+
+**Confirmed effective against a second, different symptom (2026-08-05):** not just orphaned-tree pileup — also fixes a wedged agent host that's still serving an existing connection but stuck handshaking new ones. See [`incident-2026-08-05-vscode-agent-host-wedge.md`](incident-2026-08-05-vscode-agent-host-wedge.md).
+
+**Expect a brief load spike right after running `--vscode`, not a sign of a new problem:** force-killing a whole process tree at once (extension host, language servers, etc.) causes a short, sharp CPU/reclaim burst on `dev` — observed as a decaying 15-minute load average shortly after the 2026-08-05 fix, with the 1-minute average already back to normal by the time it was checked. Give it a few minutes to settle before treating elevated load as a separate incident.
 
 ### 6. Server-side: `vscode-server-reap` timer
 
