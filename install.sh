@@ -66,6 +66,16 @@ if ! command -v fix-ssh > /dev/null 2>&1; then
     echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'fix-ssh' directly, or run \$HOME/.local/bin/fix-ssh."
 fi
 
+# Install the reset-vscode utility (clears the stale singleton lock/sockets
+# left behind after a VS Code window hang, so the next launch doesn't wedge
+# into the same "Close/Reopen" unresponsive dialog).
+echo "Installing reset-vscode to \$HOME/.local/bin..."
+curl -fsSL "$REPO_RAW/scripts/reset-vscode.sh" -o "$HOME/.local/bin/reset-vscode"
+chmod +x "$HOME/.local/bin/reset-vscode"
+if ! command -v reset-vscode > /dev/null 2>&1; then
+    echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'reset-vscode' directly, or run \$HOME/.local/bin/reset-vscode."
+fi
+
 # Apply to current session immediately via xinput
 if command -v xinput > /dev/null 2>&1; then
     TOUCHPAD_ID=$(xinput list | grep -i -E "touchpad|bcm5974|trackpad" | grep -o 'id=[0-9]*' | grep -o '[0-9]*' | head -1)
