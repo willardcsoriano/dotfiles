@@ -1,9 +1,11 @@
 # Recovery commands for the dev VM banner-exchange incident.
 # See analysis.md for the full story. Usage: run these from this directory.
 #
-#   make recover      <- the one command to run when it happens again
-#   make check        <- just look at metrics, no action taken
-#   make postmortem   <- pull logs/process info from the VM right now
+#   make recover           <- the one command to run when it happens again
+#   make check              <- just look at metrics, no action taken
+#   make postmortem         <- pull logs/process info from the VM right now
+#   make verify-hardening   <- confirm self-healing.md's mitigations are actually
+#                              live on dev, not just documented as applied
 
 SHELL := /bin/bash
 .ONESHELL:
@@ -12,7 +14,7 @@ SERVER  := dev
 HCTX    := willard-mba15
 LOGDIR  := $(HOME)/vm-incident-logs
 
-.PHONY: check password-reset soft-reboot hard-reset wait-ssh postmortem recover
+.PHONY: check password-reset soft-reboot hard-reset wait-ssh postmortem recover verify-hardening
 
 check:
 	@hcloud context use $(HCTX) >/dev/null 2>&1
@@ -66,6 +68,20 @@ postmortem:
 	} | tee "$$out"
 	echo ""
 	echo "Saved to $$out - paste relevant parts back if you want this folded into analysis.md/timeline.md."
+
+verify-hardening:
+	@echo "### docker.service crash-loop guard (self-healing.md #1) ###"
+	ssh $(SERVER) 'systemctl --user show docker.service -p StartLimitIntervalUSec,StartLimitBurst' 2>&1
+	echo ""
+	echo "### user-1000.slice memory ceiling (self-healing.md #3) ###"
+	ssh $(SERVER) 'systemctl show user-1000.slice -p MemoryMax,MemoryHigh' 2>&1
+	echo ""
+	echo "### vscode-server-reap timer (self-healing.md #6) ###"
+	ssh $(SERVER) 'systemctl --no-pager list-timers vscode-server-reap.timer 2>&1; systemctl is-enabled vscode-server-reap.timer 2>&1' 2>&1
+	echo ""
+	echo "Red flags: 'infinity' on either memory line, '0 timers listed', or 'not-found'/'disabled' on the timer -"
+	echo "that mitigation has silently regressed even though self-healing.md says it's applied. Re-deploy via"
+	echo "setup-alerting-and-memory-ceiling.md rather than trusting the doc's status line."
 
 recover:
 	@echo "### Step 1: is SSH already back up? ###"
