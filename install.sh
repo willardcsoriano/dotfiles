@@ -85,6 +85,15 @@ if ! command -v fix-wifi > /dev/null 2>&1; then
     echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'fix-wifi' directly, or run \$HOME/.local/bin/fix-wifi."
 fi
 
+# Install the ssh-control-reset systemd sleep hook (exits stale SSH
+# ControlMaster sockets after resume — suspend freezes the mux process, so
+# ServerAliveInterval never gets a chance to notice the connection died
+# while asleep, leaving a zombie master that hangs the next real connection).
+echo "Installing systemd sleep hook /etc/systemd/system-sleep/ssh-control-reset..."
+sudo mkdir -p /etc/systemd/system-sleep
+curl -fsSL "$REPO_RAW/etc/systemd/system-sleep/ssh-control-reset" | sudo tee /etc/systemd/system-sleep/ssh-control-reset > /dev/null
+sudo chmod +x /etc/systemd/system-sleep/ssh-control-reset
+
 # Apply to current session immediately via xinput
 if command -v xinput > /dev/null 2>&1; then
     TOUCHPAD_ID=$(xinput list | grep -i -E "touchpad|bcm5974|trackpad" | grep -o 'id=[0-9]*' | grep -o '[0-9]*' | head -1)

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Exit stale SSH ControlMaster sockets after resume. ServerAliveInterval
+# can't save us here: suspend freezes the mux process entirely, so its
+# keepalive timer never fires while asleep. It wakes up still believing a
+# connection is healthy that actually died under it (wifi roamed, switched
+# to a hotspot, etc), and every ssh/VS Code Remote-SSH attempt then hangs
+# on that zombie master instead of failing fast or reconnecting. Forcing
+# a clean exit here means the next connection attempt gets a real, fast
+# handshake instead of waiting on a socket that looks alive but isn't.
+[ "$1" = "post" ] || exit 0
+XUSER=$(who | awk '/:0/{print $1; exit}')
+[ -z "$XUSER" ] && exit 0
+su "$XUSER" -c '
+    for sock in "$HOME"/.ssh/cm-*; do
+        [ -S "$sock" ] || continue
+        ssh -O exit -S "$sock" x 2>/dev/null
+    done
+' 2>/dev/null || true
