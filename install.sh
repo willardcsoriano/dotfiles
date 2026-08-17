@@ -76,6 +76,15 @@ if ! command -v reset-vscode > /dev/null 2>&1; then
     echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'reset-vscode' directly, or run \$HOME/.local/bin/reset-vscode."
 fi
 
+# Install the fix-wifi utility (forces a clean wifi reconnect, or power-
+# cycles Bluetooth with --bluetooth, without needing a full reboot).
+echo "Installing fix-wifi to \$HOME/.local/bin..."
+curl -fsSL "$REPO_RAW/scripts/fix-wifi.sh" -o "$HOME/.local/bin/fix-wifi"
+chmod +x "$HOME/.local/bin/fix-wifi"
+if ! command -v fix-wifi > /dev/null 2>&1; then
+    echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'fix-wifi' directly, or run \$HOME/.local/bin/fix-wifi."
+fi
+
 # Apply to current session immediately via xinput
 if command -v xinput > /dev/null 2>&1; then
     TOUCHPAD_ID=$(xinput list | grep -i -E "touchpad|bcm5974|trackpad" | grep -o 'id=[0-9]*' | grep -o '[0-9]*' | head -1)
