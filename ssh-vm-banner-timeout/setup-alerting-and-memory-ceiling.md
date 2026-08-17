@@ -2,7 +2,7 @@
 
 This is a short, one-time setup checklist for the two pieces of `self-healing.md`'s hardening that need `sudo` and couldn't be applied non-interactively over SSH: `netdata` email alerting for memory pressure, and a host-level memory ceiling for everything running under your login session on `dev` (Docker plus `vscode-server`, which sits outside any container and outside the `mem_limit` protection already applied elsewhere). Every command below runs **on `dev`**, not on `mba15` — SSH in first (`ssh dev`), then work through the steps in order. Two commands need you to fill in a placeholder (your SMTP relay credentials and your email address) before running them; nothing else requires edits. Once done, `self-healing.md` should be updated to mark these as applied rather than pending.
 
-**Status (2026-07-29): step 5 (memory ceiling) applied and verified; step 7 (`vscode-server-reap` timer) applied.** Alerting (steps 1-4) still deferred by choice — left in place below for whenever that gets picked back up.
+**Status (2026-08-17): step 5 (memory ceiling) applied and verified; step 7 (`vscode-server-reap` timer) applied and verified live — after two prior "applied" claims (2026-07-29, then re-claimed 2026-08-03) both turned out false when actually checked against `dev`. Verify with `make verify-hardening` in `ssh-vm-banner-timeout/`, not this status line.** Alerting (steps 1-4) still deferred by choice — left in place below for whenever that gets picked back up.
 
 ---
 
