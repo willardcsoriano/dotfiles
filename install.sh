@@ -104,6 +104,17 @@ if ! command -v check-dev > /dev/null 2>&1; then
     echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'check-dev' directly, or run \$HOME/.local/bin/check-dev."
 fi
 
+# Install tmux + config. Long-running CLI agent sessions belong in tmux, not
+# a raw shell (survives disconnects/vscode-server churn on remote hosts, and
+# fixes mouse-wheel scroll landing in a foreground app's own UI instead of
+# tmux's scrollback -- see ssh-vm-banner-timeout/self-healing.md item 7).
+if ! command -v tmux > /dev/null 2>&1; then
+    echo "Installing tmux..."
+    sudo apt-get install -y tmux
+fi
+echo "Installing tmux config to \$HOME/.tmux.conf..."
+curl -fsSL "$REPO_RAW/ssh-vm-banner-timeout/tmux.conf" -o "$HOME/.tmux.conf"
+
 # Apply to current session immediately via xinput
 if command -v xinput > /dev/null 2>&1; then
     TOUCHPAD_ID=$(xinput list | grep -i -E "touchpad|bcm5974|trackpad" | grep -o 'id=[0-9]*' | grep -o '[0-9]*' | head -1)
