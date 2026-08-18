@@ -94,6 +94,16 @@ sudo mkdir -p /etc/systemd/system-sleep
 curl -fsSL "$REPO_RAW/etc/systemd/system-sleep/ssh-control-reset" | sudo tee /etc/systemd/system-sleep/ssh-control-reset > /dev/null
 sudo chmod +x /etc/systemd/system-sleep/ssh-control-reset
 
+# Install the check-dev utility (advisory-only health check for the dev VM --
+# queries docker.service restarts, swap/memory pressure, and load, then tells
+# you what to run, if anything; never takes action itself).
+echo "Installing check-dev to \$HOME/.local/bin..."
+curl -fsSL "$REPO_RAW/scripts/check-dev.sh" -o "$HOME/.local/bin/check-dev"
+chmod +x "$HOME/.local/bin/check-dev"
+if ! command -v check-dev > /dev/null 2>&1; then
+    echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'check-dev' directly, or run \$HOME/.local/bin/check-dev."
+fi
+
 # Apply to current session immediately via xinput
 if command -v xinput > /dev/null 2>&1; then
     TOUCHPAD_ID=$(xinput list | grep -i -E "touchpad|bcm5974|trackpad" | grep -o 'id=[0-9]*' | grep -o '[0-9]*' | head -1)
