@@ -17,8 +17,23 @@ q() { timeout "$TIMEOUT" ssh -o ConnectTimeout=5 -o BatchMode=yes "$HOST" "$1" 2
 echo "Checking $HOST..."
 
 if ! timeout 6 ssh -o ConnectTimeout=5 -o BatchMode=yes "$HOST" true 2>/dev/null; then
+    # A hang here could mean dev is actually down, OR it could mean the local
+    # ControlMaster to dev is a zombie (see
+    # dotfiles/notes/ssh-controlmaster-zombie-after-resume.md) -- ssh -O check
+    # would misleadingly report that master as "alive," so the only reliable
+    # way to tell them apart is a fresh, non-multiplexed connection that
+    # bypasses it entirely.
+    if timeout 8 ssh -o ControlPath=none -o ConnectTimeout=5 -o BatchMode=yes "$HOST" true 2>/dev/null; then
+        echo ""
+        echo "LOCAL ISSUE -- dev is fine (a non-multiplexed connection succeeded), but the"
+        echo "normal connection hung -- your local SSH ControlMaster to $HOST is likely a zombie."
+        echo "-> fix-ssh (no flags) to clear it. This should already auto-run on every laptop"
+        echo "   resume via the ssh-control-reset sleep hook -- if you're seeing this, worth"
+        echo "   confirming that hook is still installed: ls /etc/systemd/system-sleep/ssh-control-reset"
+        exit 1
+    fi
     echo ""
-    echo "UNREACHABLE -- $HOST didn't respond to a basic SSH command within 6s."
+    echo "UNREACHABLE -- $HOST didn't respond even to a fresh, non-multiplexed connection."
     echo "-> (cd ~/projects/dotfiles/ssh-vm-banner-timeout && make check) for metrics,"
     echo "   then make recover if it's actually down (may need a VM reboot/reset)."
     exit 1
