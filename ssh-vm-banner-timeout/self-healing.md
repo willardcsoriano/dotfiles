@@ -15,6 +15,7 @@ Two diagnosed incidents (2026-07-24, 2026-07-28) shared one blind spot: by the t
   - [4. Client-side: `ControlMaster` re-added](#4-client-side-controlmaster-re-added)
   - [5. Client-side: `fix-ssh` revived, modernized](#5-client-side-fix-ssh-revived-modernized)
   - [6. Server-side: `vscode-server-reap` timer](#6-server-side-vscode-server-reap-timer)
+  - [7. Client-side: agent CLI sessions moved into `tmux`](#7-client-side-agent-cli-sessions-moved-into-tmux)
 - [Still a manual habit, not automated](#still-a-manual-habit-not-automated)
 - [What's still open](#whats-still-open)
 
@@ -112,6 +113,14 @@ Once actually installed: a systemd timer on `dev` runs [`reap-vscode-server.sh`]
 This is deliberately **age-based, not connection-aware** — it does not try to determine whether a session currently has a live client attached, only how old it is. That's a conscious tradeoff, not an oversight: accurately detecting "orphaned vs. currently connected" would require checking for an established peer on each session's control socket, which is fiddly to get right and risks the exact wrong failure mode (killing a session someone is actively using) if the liveness check has any edge case. A flat 24-hour age ceiling is much harder to get wrong — no single VS Code Remote-SSH window realistically stays open for a full day without at least one reconnect in between, and worst case if it ever does, the cost is one forced reconnect (a few seconds), not lost work. It would have caught the confirmed incident, whose oldest orphaned session was already ~19 hours old.
 
 Unit files: [`vscode-server-reap.service`](vscode-server-reap.service), [`vscode-server-reap.timer`](vscode-server-reap.timer). Installed to `/usr/local/bin/reap-vscode-server.sh` and `/etc/systemd/system/` — see `setup-alerting-and-memory-ceiling.md` for the install commands.
+
+### 7. Client-side: agent CLI sessions moved into `tmux`
+
+**Added 2026-08-17.** `fix-ssh --vscode dev` is destructive to every session in the `vscode-server` process tree, not just orphaned ones — including any long-running agent CLI (e.g. Claude Code) started directly in a VS Code integrated terminal, since its shell is a child of that same tree. That made the tool something to reach for reluctantly, which defeats the point of having a fast, reflexive fix for pileup.
+
+Fix: run agent CLI sessions inside `tmux` on `dev` instead of directly in a VS Code terminal (`tmux new -s <name>`, reattach later with `tmux attach -t <name>`). `tmux`'s server is its own independent process, entirely outside the `vscode-server` tree — `fix-ssh --vscode dev` cannot reach it. This makes the tool safe to run freely and immediately after any bad disconnect, rather than something to hesitate over. Tradeoffs worth knowing: `tmux` sessions don't self-clean any more than the old `vscode-server` trees did (same shape of risk, much smaller blast radius — a bare shell + one process, not a full extension host + JVM), it doesn't protect against the VM itself running out of memory for unrelated reasons, and it doesn't survive an actual VM reboot (only SSH/`vscode-server` churn).
+
+Config deployed to `~/.tmux.conf` on `dev`: [`tmux.conf`](tmux.conf) (not installed via `dotfiles/install.sh`, which only targets mba15 — copy directly, then `tmux source-file ~/.tmux.conf` to apply live without killing existing sessions). Also fixes a related, non-obvious problem: `tmux`'s default mouse-wheel binding defers to whatever app is running if it's requested its own mouse tracking (Claude Code's CLI does), so scroll was landing in Claude Code's own UI instead of `tmux`'s scrollback — confirmed via `tmux list-keys`, not assumed, since this exact binding has shifted across `tmux` versions. The config forces wheel-up to always enter `tmux` copy-mode regardless of what the foreground app wants, so scrolling reliably reaches real conversation history — verified working live after deploying.
 
 ## Still a manual habit, not automated
 

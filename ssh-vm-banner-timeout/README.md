@@ -19,6 +19,7 @@ This documents a recurring incident on the `dev` VM (Hetzner, `178.104.35.30`, D
 - [`runbook.md`](runbook.md) — the out-of-band diagnostic steps that worked (via `hcloud` CLI, no console needed) — reusable if this or a similar issue recurs.
 - [`self-healing.md`](self-healing.md) — follow-up safeguards (crash-restart loop guard, memory ceiling, `netdata` alerting, client-side hardening, a scheduled `vscode-server` reaper) and the incident log for the separate VS Code Remote-SSH reconnect-storm failure mode these were built for.
 - [`setup-alerting-and-memory-ceiling.md`](setup-alerting-and-memory-ceiling.md) — copy-paste checklist for the pieces of `self-healing.md` that need `sudo` on `dev`.
+- [`tmux.conf`](tmux.conf) — deployed to `~/.tmux.conf` on `dev` (not installed via `dotfiles/install.sh`, which only targets mba15). Makes `fix-ssh --vscode dev` safe to run freely by moving long-running agent CLI sessions out of the `vscode-server` process tree entirely; also fixes mouse-wheel scroll landing in the foreground app's own UI instead of tmux's scrollback.
 
 ## The one rule that matters
 
