@@ -16,6 +16,7 @@ Two diagnosed incidents (2026-07-24, 2026-07-28) shared one blind spot: by the t
   - [5. Client-side: `fix-ssh` revived, modernized](#5-client-side-fix-ssh-revived-modernized)
   - [6. Server-side: `vscode-server-reap` timer](#6-server-side-vscode-server-reap-timer)
   - [7. Client-side: agent CLI sessions moved into `tmux`](#7-client-side-agent-cli-sessions-moved-into-tmux)
+  - [8. Server-side: `vscode-server-reap-orphans` timer (fast, connection-aware)](#8-server-side-vscode-server-reap-orphans-timer-fast-connection-aware)
 - [Still a manual habit, not automated](#still-a-manual-habit-not-automated)
 - [What's still open](#whats-still-open)
 
@@ -29,6 +30,7 @@ Full write-ups live in their own files, one per incident, so this document stays
 - [`incident-2026-08-12-company-wifi-blocked-dev.md`](incident-2026-08-12-company-wifi-blocked-dev.md) — not a `dev`-side problem at all: a company Wi-Fi network was selectively blocking TCP to `dev`'s IP on every port (likely ASN/IP-reputation-based egress filtering), while ICMP and other hosts worked fine. Switching networks fixed it. Also surfaced an unpatched `pkill -f` self-kill bug in `fix-ssh --vscode` — see "What's still open" below.
 - [`incident-2026-08-12-mobile-sim-connectivity-struggle.md`](incident-2026-08-12-mobile-sim-connectivity-struggle.md) — same day, different network: a mobile SIM showed the same destination-specific pattern (heavy loss to `dev` specifically, 0% loss to comparison hosts). Switching carriers fixed it. Also confirmed not a compromise, ruled out the local Wi-Fi hop, and found Hetzner's browser-based console (`hcloud server request-console`) as an SSH-independent emergency fallback.
 - [`incident-2026-08-17-vscode-server-pileup-reaper-still-not-deployed.md`](incident-2026-08-17-vscode-server-pileup-reaper-still-not-deployed.md) — third occurrence of the same pileup mechanism as 07-29/08-03; live-verified this was the `vscode-server` pileup and not the Docker crash-loop mechanism (`docker.service` had 0 restarts throughout). `fix-ssh --vscode dev` recovered it without any VM reboot, needing 3 attempts because the VM was under heavier pressure than prior occurrences. Root cause: the reaper timer below was, again, not actually deployed — the third time this exact gap has been found. Added `make verify-hardening` so this can't silently recur a fourth time.
+- [`incident-2026-08-21-wifi-switch-vscode-pileup.md`](incident-2026-08-21-wifi-switch-vscode-pileup.md) — fourth occurrence, but a new trigger shape: a wifi network switch (not a slow multi-hour/day accumulation) took swap to 100% full and load average to ~95 in under an hour — inside the 24h reaper's detection window entirely. `fix-ssh --vscode dev` recovered it; `tmux`-hosted agent sessions survived untouched, confirming item 7 still works. Closed the gap with a second, faster, connection-aware reaper (item 8).
 
 ## What's now in place
 
@@ -126,6 +128,34 @@ Config: [`tmux.conf`](tmux.conf), deployed to `~/.tmux.conf` on `dev` (manually 
 - **Click-drag copy not reaching the real clipboard.** `dev` is headless — no X11, no `xclip` — so there is no local clipboard on the machine `tmux` runs on at all. `set-clipboard` makes `tmux` relay via the xterm OSC 52 escape sequence, which the *client* terminal (wherever you're actually sitting) intercepts and writes to the real system clipboard, transparently over SSH. But this only fires for tmux's own native copy commands, not `copy-pipe`/`copy-pipe-and-cancel` (which pipe to an external command instead) — and `tmux`'s default mouse-drag-release binding uses `copy-pipe-and-cancel` with no command specified, an effective no-op on a host with no `xclip`. Rebound to the native `copy-selection-and-cancel` so the relay actually fires.
 
 Both verified working live after deploying.
+
+### 8. Server-side: `vscode-server-reap-orphans` timer (fast, connection-aware)
+
+**Added 2026-08-22**, after [`incident-2026-08-21-wifi-switch-vscode-pileup.md`](incident-2026-08-21-wifi-switch-vscode-pileup.md) exposed a gap item 6 was never designed to cover: a wifi-switch-triggered pileup reached crisis level (load average ~95, swap 100% full) in under an hour, well inside the 24h age threshold that reaper checks for.
+
+Item 6's own writeup explicitly chose age over connection-awareness because "accurately detecting orphaned vs. currently connected... is fiddly to get right and risks the exact wrong failure mode." This reaper avoids that risk with a narrower, structurally-safe signal instead of a general liveness check: it only kills a `vscode-server` tree whose top-level launcher (the `command-shell`/`agent host` process sshd spawns directly per connection) has `PPID=1`. A tree still attached to a live SSH session always has a real, live process as its parent — `PPID=1` can only happen once that session has actually died and the kernel has reparented its orphaned children. There's no ambiguous case to get wrong, unlike trying to infer liveness from a control socket.
+
+```bash
+kill_tree() {
+    local pid="$1" child
+    for child in $(pgrep -P "$pid" 2>/dev/null); do
+        kill_tree "$child"
+    done
+    kill -9 "$pid" 2>/dev/null || true
+}
+
+ps -eo pid,ppid,args --no-headers \
+  | grep -E '\.vscode-server/code-[0-9a-f]+ (agent host|command-shell)' \
+  | while read -r pid ppid _rest; do
+      [ "$ppid" -eq 1 ] && kill_tree "$pid"
+    done
+```
+
+Runs every 2 minutes via [`vscode-server-reap-orphans.timer`](vscode-server-reap-orphans.timer) (`OnBootSec=1min`, `OnUnitActiveSec=2min`) → [`vscode-server-reap-orphans.service`](vscode-server-reap-orphans.service), installed alongside item 6's units rather than replacing them — the two cover different accumulation speeds (this one: single-event pileups in minutes; item 6: slow multi-hour/day accumulation from causes like a version-mismatched reconnect, per item 6's own note). Script: [`reap-vscode-orphans.sh`](reap-vscode-orphans.sh).
+
+Verified live against `dev`: correctly found and *ignored* a freshly-reconnected window's tree (confirmed its `PPID` traced to a live shell process, not `1`).
+
+**Also investigated during this incident, but not the fix:** `salesforce.apex-language-server-extension` (a separate, early-stage TypeScript rewrite of the Apex language server) was found using 1.36-2.36GB per window — its upstream repo states "experimental - DO NOT USE." Updated, concurrency-capped, then uninstalled entirely (confirmed via `extensionDependencies` check that nothing else in the Salesforce pack requires it). This reduced each window's baseline footprint but is unrelated to the reap-orphans fix above — a pileup of even lean trees still compounds. Also considered and **reverted**: disabling `ControlMaster` for `dev` to reduce reconnect blast radius — see the incident file's "ControlMaster red herring" section for why this doesn't actually help and would have undone item 4's deliberate decision.
 
 ## Still a manual habit, not automated
 
