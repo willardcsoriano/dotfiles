@@ -47,6 +47,8 @@ SWAP_TOTAL=$(q "free -m | awk '/Swap:/{print \$2}'")
 SLICE_CUR=$(q "systemctl show user-1000.slice -p MemoryCurrent --value")
 SLICE_HIGH=$(q "systemctl show user-1000.slice -p MemoryHigh --value")
 LOAD1=$(q "cut -d' ' -f1 /proc/loadavg")
+EXTHOST_COUNT=$(q "pgrep -fc 'type=extensionHost'")
+OLDEST_SECS=$(q "ps -eo etimes,cmd --sort=start_time | grep '[.]vscode-server/' | head -1 | awk '{print \$1}'")
 
 HUNG=0
 for v in "$DOCKER_RESTARTS" "$MEM_USED" "$SWAP_TOTAL" "$SLICE_CUR" "$LOAD1"; do
@@ -70,11 +72,16 @@ SLICE_PCT=0
 [ "${SLICE_HIGH:-0}" -gt 0 ] 2>/dev/null && SLICE_PCT=$((SLICE_CUR * 100 / SLICE_HIGH))
 
 echo ""
+OLDEST_HOURS=0
+[ "${OLDEST_SECS:-0}" -gt 0 ] 2>/dev/null && OLDEST_HOURS=$((OLDEST_SECS / 3600))
+
 echo "  docker.service restarts : $DOCKER_RESTARTS"
 echo "  RAM used                : ${MEM_USED}Mi / ${MEM_TOTAL}Mi"
 echo "  swap used                : ${SWAP_USED}Mi / ${SWAP_TOTAL}Mi (${SWAP_PCT}%)"
 echo "  user-1000.slice          : ${SLICE_PCT}% of MemoryHigh ceiling"
 echo "  load average (1m)        : $LOAD1"
+echo "  open vscode windows      : ${EXTHOST_COUNT:-0} (extensionHost count)"
+echo "  oldest vscode session    : ~${OLDEST_HOURS}h old"
 echo ""
 
 ACTION=""
@@ -85,10 +92,22 @@ if [ "${DOCKER_RESTARTS:-0}" -gt 0 ] 2>/dev/null; then
 fi
 
 if [ "$SWAP_PCT" -ge 80 ] || [ "$SLICE_PCT" -ge 90 ]; then
-    echo "SIGNATURE: swap/memory ceiling pressure -- matches the vscode-server pileup mechanism."
-    echo "-> fix-ssh --vscode $HOST (safe with tmux-hosted agent sessions -- see"
-    echo "   dotfiles/ssh-vm-banner-timeout/self-healing.md item 5). May need 2-3 attempts"
-    echo "   under real pressure; check this script again afterward to confirm recovery."
+    echo "SIGNATURE: swap/memory ceiling pressure."
+    if [ "$OLDEST_HOURS" -ge 12 ] 2>/dev/null; then
+        echo "Oldest session is ~${OLDEST_HOURS}h old (well past a normal work session) -- this"
+        echo "matches the vscode-server orphaned-session pileup mechanism."
+        echo "-> fix-ssh --vscode $HOST (safe with tmux-hosted agent sessions -- see"
+        echo "   dotfiles/ssh-vm-banner-timeout/self-healing.md item 5). May need 2-3 attempts"
+        echo "   under real pressure; check this script again afterward to confirm recovery."
+    else
+        echo "Oldest session is only ~${OLDEST_HOURS}h old with ${EXTHOST_COUNT:-0} window(s) open --"
+        echo "this looks like real, current usage (e.g. multiple heavy Remote-SSH windows), not"
+        echo "an orphaned pileup. fix-ssh --vscode $HOST kills EVERY session indiscriminately,"
+        echo "live ones included -- confirm the open-window count matches what you actually have"
+        echo "open before running it. If it doesn't match, or you don't need all of them open,"
+        echo "closing a window (or fix-ssh --vscode $HOST if you're fine losing all of them) will"
+        echo "relieve the pressure directly."
+    fi
     ACTION=1
 fi
 
@@ -101,4 +120,7 @@ fi
 
 if [ -z "$ACTION" ]; then
     echo "Looks fine -- no action needed."
+    exit 0
 fi
+
+exit 1
