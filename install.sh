@@ -100,6 +100,17 @@ if command -v systemctl > /dev/null 2>&1; then
     systemctl --user enable --now wifi-watchdog.service
 fi
 
+# Install the recon utility (runs every local diagnostic -- wifi, SSH
+# ControlMaster, VS Code lock -- plus the dev VM check, and prints exactly
+# which alias to run for whatever it finds. Advisory only, entirely local;
+# see notes/wifi-driver-lockup-2026-08-21.md for why this exists).
+echo "Installing recon to \$HOME/.local/bin..."
+curl -fsSL "$REPO_RAW/scripts/recon.sh" -o "$HOME/.local/bin/recon"
+chmod +x "$HOME/.local/bin/recon"
+if ! command -v recon > /dev/null 2>&1; then
+    echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'recon' directly, or run \$HOME/.local/bin/recon."
+fi
+
 # Install the ssh-control-reset systemd sleep hook (exits stale SSH
 # ControlMaster sockets after resume — suspend freezes the mux process, so
 # ServerAliveInterval never gets a chance to notice the connection died
