@@ -1,0 +1,7 @@
+[Unit]
+Description=Reap orphaned vscode-server session trees (PPID=1)
+
+[Service]
+Type=oneshot
+User=willard
+ExecStart=/usr/local/bin/reap-vscode-orphans.sh

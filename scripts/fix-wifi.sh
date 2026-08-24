@@ -13,6 +13,14 @@ set -euo pipefail
 #                          device. Use when wifi is connected-but-flaky
 #                          (repeated drops, slow/stuck roaming between
 #                          access points on the same network).
+#   fix-wifi --radio       Power-cycle the wifi radio itself (nmcli radio
+#                          wifi off/on). Use when plain fix-wifi doesn't
+#                          help -- i.e. wpa_supplicant logs "Association
+#                          request to the driver failed" against every
+#                          network, not just one. That means the driver/
+#                          firmware state is wedged, one layer below what a
+#                          connection-profile disconnect/reconnect can
+#                          reach. See notes/wifi-driver-lockup-2026-08-21.md.
 #   fix-wifi --bluetooth   Power-cycle the Bluetooth radio. Use when
 #                          Bluetooth tethering (phone NAP connection) fails
 #                          to come up (bluez "Input/output error" is the
@@ -31,6 +39,14 @@ fix_wifi() {
     echo "Done."
 }
 
+fix_radio() {
+    echo "Power-cycling wifi radio..."
+    nmcli radio wifi off
+    sleep 2
+    nmcli radio wifi on
+    echo "Done."
+}
+
 fix_bluetooth() {
     echo "Power-cycling Bluetooth..."
     bluetoothctl power off
@@ -39,8 +55,14 @@ fix_bluetooth() {
     echo "Done."
 }
 
-if [ "${1:-}" = "--bluetooth" ]; then
-    fix_bluetooth
-else
-    fix_wifi
-fi
+case "${1:-}" in
+    --radio)
+        fix_radio
+        ;;
+    --bluetooth)
+        fix_bluetooth
+        ;;
+    *)
+        fix_wifi
+        ;;
+esac

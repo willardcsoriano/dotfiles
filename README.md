@@ -44,10 +44,29 @@ Turns on VS Code's own reconnect handling for Remote-SSH sessions instead of lea
 
 ### Troubleshooting aliases
 
-Installed to `~/.local/bin/fix-ssh` — try these before reaching for anything heavier when a remote connection is acting up:
+Installed to `~/.local/bin/` by `install.sh`. **Don't know which one to run? Run `recon` first** — it checks everything below plus the `dev` VM and tells you exactly what to run next. It works fully offline (no network, no agent) since it only reads local state, which is the point: it exists because of an incident where the network itself was down and there was no way to ask anything what to run. See [`notes/wifi-driver-lockup-2026-08-21.md`](notes/wifi-driver-lockup-2026-08-21.md).
 
-- **`fix-ssh`** — cleans up stale local `ControlMaster` sockets left behind by a bad disconnect. Safe to run reflexively: it only ever removes a socket after confirming its master connection is actually dead (`ssh -O check`), so it won't touch a live one.
+Quick reference if you'd rather skip straight to a fix:
+
+| Symptom | Run |
+|---|---|
+| Not sure / want a diagnosis first | `recon` |
+| SSH or VS Code Remote-SSH hanging (not erroring, just hanging) | `fix-ssh` |
+| VS Code Remote-SSH won't reconnect, or a new window won't connect while another still works | `fix-ssh --vscode [host]` (default `dev`) |
+| Wifi connected but flaky / stuck roaming between access points | `fix-wifi` |
+| Wifi disconnected and `fix-wifi` alone didn't clear it within a few seconds | `fix-wifi --radio` |
+| Bluetooth phone tether (NAP) fails with an I/O error | `fix-wifi --bluetooth` |
+| Local VS Code window frozen / "Close, Reopen" hang loop | `reset-vscode` |
+| `dev` VM unreachable or acting up | `check-dev` |
+
+- **`recon`** — runs every check below (wifi, SSH `ControlMaster`, VS Code lock, `dev` VM) in one pass and prints a diagnosis with the exact alias to run for whatever it finds. Advisory only, never takes action itself. Exits non-zero if it found anything.
+- **`fix-ssh`** — cleans up stale local `ControlMaster` sockets left behind by a bad disconnect. Safe to run reflexively: it only ever removes a socket after confirming its master connection is actually dead (`ssh -O check`), so it won't touch a live one. Caveat: `ssh -O check` can false-positive "alive" on a `ControlMaster` frozen by laptop suspend (see `notes/ssh-controlmaster-zombie-after-resume.md`) — if SSH is hanging despite `fix-ssh` reporting sockets as live, run it anyway, it's harmless either way.
 - **`fix-ssh --vscode [host]`** (default host: `dev`) — force-kills every `vscode-server` process on the given remote host and lets a fresh one spawn on reconnect. Not safe in the same way as the bare form — it drops any currently-connected window too, not just orphaned ones, since there's no remote-side way to tell the difference. Reach for this when VS Code Remote-SSH won't reconnect, a new window won't connect while an existing one still works, or memory looks pinned by piled-up `vscode-server` processes. See `ssh-vm-banner-timeout/self-healing.md` for the incidents this covers.
+- **`fix-wifi`** — forces a clean wifi disconnect/reconnect at the connection-profile level (the same "fresh association" effect a reboot has, without one). Use first for ordinary flakiness or roaming issues.
+- **`fix-wifi --radio`** — power-cycles the wifi radio itself (`nmcli radio wifi off`/`on`), one layer below `fix-wifi`. Use when `fix-wifi` doesn't help — the driver/firmware state can wedge and refuse every association attempt regardless of network, which a connection-profile cycle can't reach. A `wifi-watchdog` systemd `--user` service (enabled by `install.sh`) detects this pattern automatically and runs this for you after ~60s stuck disconnected, so you shouldn't usually need to run it by hand. See `notes/wifi-driver-lockup-2026-08-21.md`.
+- **`fix-wifi --bluetooth`** — power-cycles the Bluetooth radio. Use when a Bluetooth phone tether (NAP) fails to come up (`bluez` "Input/output error" is the usual symptom). A wifi hotspot from the phone is more reliable than Bluetooth tethering going forward, if that's an option.
+- **`reset-vscode`** — kills local VS Code processes and clears the stale singleton lock/IPC sockets they leave behind, which is what causes the "Close, Reopen" hang to recur even after reopening. Relaunches VS Code afterward unless run as `reset-vscode --no-relaunch`.
+- **`check-dev`** — advisory-only health check for the `dev` VM. Distinguishes a local `ControlMaster` zombie from `dev` actually being down, and reports which of the known `dev`-side failure mechanisms (Docker crash-loop, `vscode-server` pileup) matches, if any. See `ssh-vm-banner-timeout/README.md`.
 
 ### Microsoft Teams (optional)
 
