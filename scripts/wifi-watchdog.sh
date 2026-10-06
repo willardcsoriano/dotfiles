@@ -72,14 +72,25 @@ while true; do
     if [ "$fail_count" -ge "$FAILURE_THRESHOLD" ] && [ $((now - last_trigger)) -ge "$COOLDOWN_SECONDS" ]; then
         stuck_for=$((fail_count * POLL_INTERVAL_SECONDS))
         echo "wifi-watchdog: $dev stuck disconnected for ~${stuck_for}s, running radio reset..."
+        radio_ok=true
         if command -v fix-wifi > /dev/null 2>&1; then
-            fix-wifi --radio
+            fix-wifi --radio || radio_ok=false
         else
-            nmcli radio wifi off
+            nmcli radio wifi off || true
             sleep 2
-            nmcli radio wifi on
+            nmcli radio wifi on || true
+            sleep 1
+            [ "$(nmcli radio wifi)" = "enabled" ] || radio_ok=false
         fi
-        notify "$dev looked wedged for ~${stuck_for}s -- ran a radio reset (nmcli radio wifi off/on)."
+        # Confirmed 2026-10-06: the re-enable call can fail outright (a polkit
+        # race right after resume), leaving the radio off with a falsely
+        # reassuring notification otherwise. See
+        # notes/wifi-watchdog-resume-polkit-race-disables-radio.md.
+        if $radio_ok; then
+            notify "$dev looked wedged for ~${stuck_for}s -- ran a radio reset (nmcli radio wifi off/on)."
+        else
+            notify "$dev looked wedged for ~${stuck_for}s -- radio reset FAILED, wifi may still be off. Run: nmcli radio wifi on"
+        fi
         last_trigger=$now
         fail_count=0
     fi
