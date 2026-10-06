@@ -41,10 +41,34 @@ fix_wifi() {
 
 fix_radio() {
     echo "Power-cycling wifi radio..."
-    nmcli radio wifi off
+    nmcli radio wifi off || true
     sleep 2
-    nmcli radio wifi on
-    echo "Done."
+
+    # A single fire-and-forget re-enable isn't enough -- confirmed 2026-10-06
+    # that the re-enable call can fail outright (a polkit authorization race
+    # right after a laptop resume), leaving the radio off with no indication
+    # anything went wrong. See notes/wifi-watchdog-resume-polkit-race-disables-radio.md.
+    # Every nmcli call here is explicitly guarded (|| true, or inside an if)
+    # so a failed attempt falls through to the retry instead of aborting the
+    # whole script under `set -e`.
+    local attempt ok=false
+    for attempt in 1 2 3; do
+        nmcli radio wifi on || true
+        sleep 1
+        if [ "$(nmcli radio wifi)" = "enabled" ]; then
+            ok=true
+            break
+        fi
+        echo "Re-enable attempt $attempt did not take effect, retrying..." >&2
+        sleep 2
+    done
+
+    if $ok; then
+        echo "Done."
+    else
+        echo "Radio did not re-enable after 3 attempts -- it may still be off. Run: nmcli radio wifi on" >&2
+        return 1
+    fi
 }
 
 fix_bluetooth() {
