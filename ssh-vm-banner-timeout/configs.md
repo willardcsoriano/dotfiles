@@ -74,11 +74,17 @@ Host *
     AddKeysToAgent yes
     ServerAliveInterval 10
     ServerAliveCountMax 3
-    ConnectTimeout 5
+    ConnectTimeout 15
+    ConnectionAttempts 5
     IPQoS 0
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%h
+    ControlPersist 2h
 ```
 
-Multiplexing (`ControlMaster`/`ControlPath`/`ControlPersist`) has been completely removed, not just disabled. In between the original baseline and this present state, `ControlPath` was actually changed twice more first (`~/.ssh/cm-%r@%h:%p` → `~/.ssh/cm-%h`) while multiplexing was still enabled, chasing a stale-socket bug, before the decision was made to drop multiplexing entirely — see `timeline.md` attempt 3.
+Multiplexing was removed once (`timeline.md` attempt 3, after `ControlPath` changed from `~/.ssh/cm-%r@%h:%p` to `~/.ssh/cm-%h` while chasing a stale-socket bug) and then deliberately re-added on 2026-07-29 — see `self-healing.md`. The zombie-master-after-suspend failure it can cause is handled by the `ssh-control-reset` sleep hook. `ConnectionAttempts 5` was added on 2026-08-12 (`incident-2026-08-12-mobile-sim-connectivity-struggle.md`).
+
+`ConnectTimeout` was raised from 5 to 15 on 2026-10-12. VS Code Remote-SSH reads this value, adds 2s, and uses the result as its whole connect budget, overriding `remote.SSH.connectTimeout`. At 5, it gave up after 7s, which a slow mobile link can't meet (`incident-2026-10-12-slow-mobile-link-remote-ssh-timeout.md`). The cost is that a plain `ssh` to a truly dead host now waits up to 15s per attempt before failing.
 
 `IPQoS` was originally set to `0x00` (invalid syntax — OpenSSH rejects the hex-prefixed form outright, which broke the SSH client entirely, for every host, not just `dev`). Fixed to the valid decimal form `IPQoS 0` on 2026-07-24. See `timeline.md` ("Self-inflicted regression") and `analysis.md` for why the underlying theory behind this line was technically unsound to begin with; it's left in place only because it's harmless, not because it's believed to matter.
 

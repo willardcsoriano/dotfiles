@@ -38,7 +38,7 @@ Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, 
 
 Turns on VS Code's own reconnect handling for Remote-SSH sessions instead of leaving it on defaults.
 
-- **Connect timeout raised to 15s** — `remote.SSH.connectTimeout` gives slow or waking remote hosts enough time to answer before VS Code gives up
+- **Connect timeout raised to 15s** — `remote.SSH.connectTimeout` gives slow or waking remote hosts enough time to answer before VS Code gives up. Remote-SSH ignores this setting whenever `~/.ssh/config` sets `ConnectTimeout` for the host and uses that value + 2s instead, so keep `ConnectTimeout` there at 15 or more too
 - **Local server enabled** — `remote.SSH.useLocalServer` lets VS Code manage a local proxy process for cleaner reconnects
 - Merged into `~/.config/Code/User/settings.json` without touching your other settings
 
