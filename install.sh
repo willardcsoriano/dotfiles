@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="v0.1.0"
+VERSION="v0.2.0"
 REPO_RAW="https://raw.githubusercontent.com/willardcsoriano/dotfiles/$VERSION"
 
 # Require Debian/Ubuntu
