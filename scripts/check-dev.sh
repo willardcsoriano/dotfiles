@@ -77,6 +77,9 @@ SLOW_LINK=0
 DOCKER_RESTARTS=$(q "systemctl --user show docker.service -p NRestarts --value")
 MEM_USED=$(q "free -m | awk '/Mem:/{print \$3}'")
 MEM_TOTAL=$(q "free -m | awk '/Mem:/{print \$2}'")
+MEM_AVAIL=$(q "free -m | awk '/Mem:/{print \$7}'")
+# Share of the last 60s some task stalled on memory (PSI). Integer part only.
+PSI_SOME60=$(q "awk -F'[ =]' '/^some/{print int(\$5)}' /proc/pressure/memory")
 SWAP_USED=$(q "free -m | awk '/Swap:/{print \$3}'")
 SWAP_TOTAL=$(q "free -m | awk '/Swap:/{print \$2}'")
 SLICE_CUR=$(q "systemctl show user-1000.slice -p MemoryCurrent --value")
@@ -103,6 +106,17 @@ fi
 SWAP_PCT=0
 [ "$SWAP_TOTAL" -gt 0 ] 2>/dev/null && SWAP_PCT=$((SWAP_USED * 100 / SWAP_TOTAL))
 
+AVAIL_PCT=100
+[ "${MEM_TOTAL:-0}" -gt 0 ] 2>/dev/null && AVAIL_PCT=$((MEM_AVAIL * 100 / MEM_TOTAL))
+
+# Full swap alone isn't pressure: long-idle processes (e.g. tmux-hosted agent
+# sessions) get paged out while RAM stays available and nothing stalls. Only
+# treat it as pressure when RAM is also short or tasks are stalling on memory.
+SWAP_PRESSURE=0
+if [ "$SWAP_PCT" -ge 80 ] && { [ "$AVAIL_PCT" -lt 15 ] || [ "${PSI_SOME60:-0}" -ge 5 ]; }; then
+    SWAP_PRESSURE=1
+fi
+
 SLICE_PCT=0
 [ "${SLICE_HIGH:-0}" -gt 0 ] 2>/dev/null && SLICE_PCT=$((SLICE_CUR * 100 / SLICE_HIGH))
 
@@ -112,7 +126,9 @@ OLDEST_HOURS=0
 
 echo "  docker.service restarts : $DOCKER_RESTARTS"
 echo "  RAM used                : ${MEM_USED}Mi / ${MEM_TOTAL}Mi"
+echo "  RAM available            : ${MEM_AVAIL}Mi (${AVAIL_PCT}%)"
 echo "  swap used                : ${SWAP_USED}Mi / ${SWAP_TOTAL}Mi (${SWAP_PCT}%)"
+echo "  memory stall (PSI 60s)   : ${PSI_SOME60:-?}%"
 echo "  user-1000.slice          : ${SLICE_PCT}% of MemoryHigh ceiling"
 echo "  load average (1m)        : $LOAD1"
 echo "  open vscode windows      : ${EXTHOST_COUNT:-0} (extensionHost count)"
@@ -126,7 +142,13 @@ if [ "${DOCKER_RESTARTS:-0}" -gt 0 ] 2>/dev/null; then
     ACTION=1
 fi
 
-if [ "$SWAP_PCT" -ge 80 ] || [ "$SLICE_PCT" -ge 90 ]; then
+if [ "$SWAP_PCT" -ge 80 ] && [ "$SWAP_PRESSURE" -eq 0 ] && [ "$SLICE_PCT" -lt 90 ]; then
+    echo "NOTE: swap is ${SWAP_PCT}% full, but ${AVAIL_PCT}% of RAM is available and nothing is"
+    echo "stalling on memory -- idle processes paged out, not pressure. Headroom is thin, though:"
+    echo "-> see what's holding it: ssh $HOST 'tmux ls' (long-idle agent sessions are the usual cause)."
+fi
+
+if [ "$SWAP_PRESSURE" -eq 1 ] || [ "$SLICE_PCT" -ge 90 ]; then
     echo "SIGNATURE: swap/memory ceiling pressure."
     if [ "$OLDEST_HOURS" -ge 12 ] 2>/dev/null; then
         echo "Oldest session is ~${OLDEST_HOURS}h old (well past a normal work session) -- this"
