@@ -157,6 +157,17 @@ Verified live against `dev`: correctly found and *ignored* a freshly-reconnected
 
 **Also investigated during this incident, but not the fix:** `salesforce.apex-language-server-extension` (a separate, early-stage TypeScript rewrite of the Apex language server) was found using 1.36-2.36GB per window — its upstream repo states "experimental - DO NOT USE." Updated, concurrency-capped, then uninstalled entirely (confirmed via `extensionDependencies` check that nothing else in the Salesforce pack requires it). This reduced each window's baseline footprint but is unrelated to the reap-orphans fix above — a pileup of even lean trees still compounds. Also considered and **reverted**: disabling `ControlMaster` for `dev` to reduce reconnect blast radius — see the incident file's "ControlMaster red herring" section for why this doesn't actually help and would have undone item 4's deliberate decision.
 
+### 9. Server-side: long-running agent host hardening (2026-10-12)
+
+Lives in the `debian-server-baselines` repo, not here: `scripts/dev.sh` section 9/9, documented in `docs/agent-host.md`. It builds on item 7 (agents in `tmux`):
+
+- A second swap file tops swap up to 16 GB, so idle agents page out without exhausting headroom.
+- `agent-oom-priority.timer` (root, every minute) makes the kernel OOM killer prefer `vscode-server` (+500) over tmux agent trees (−500). Before this, an agent outscored `vscode-server` and would have been killed first.
+- `agent-sessions` records each tmux session's Claude conversation ID every 5 minutes. After any reboot, including `make recover` or a hard reset, `agent-sessions restore` brings every session back.
+- A managed-settings drop-in raises Claude Code transcript retention to 90 days, so an idle session can still be resumed.
+
+Docker upgrades now go only through `scripts/docker-upgrade.sh`; `dev.sh` re-runs install with `--no-upgrade`. Verify with the commands in `agent-host.md` § Verification, not this summary.
+
 ## Still a manual habit, not automated
 
 **After any `Connection timed out` / `Broken pipe`, run `fix-ssh --vscode dev` before reconnecting** — it's faster than waiting for the reaper's next 6-hour cycle (once that's actually deployed), and more reliable than VS Code's own `Remote-SSH: Kill VS Code Server on Host` command, which is command-palette-only, requires closing the connection first, and has open reliability bugs. Item 6 above is a backstop for when this manual step gets skipped, not a replacement for it — and as of 2026-08-03, item 6 isn't actually live yet, so this is currently the *only* mitigation in place. Bare `fix-ssh` (no flag) only cleans up the *client's* stale control sockets, not anything left running on the VM itself.
