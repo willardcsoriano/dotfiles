@@ -14,11 +14,17 @@ TIMEOUT=8
 
 q() { timeout "$TIMEOUT" ssh -o ConnectTimeout=5 -o BatchMode=yes "$HOST" "$1" 2>/dev/null; }
 
-# Above this, a fresh handshake is slow enough that VS Code Remote-SSH is at
-# risk of timing out (its budget is ssh's ConnectTimeout + 2s, and it also has
-# to start the remote server inside that window) -- see
+# VS Code Remote-SSH's connect budget is the host's ssh ConnectTimeout + 2s
+# (that overrides remote.SSH.connectTimeout; with no ConnectTimeout set it falls
+# back to that setting's default, 15), and the remote server must also start
+# inside the window. Flag a fresh handshake that uses half the budget -- see
 # incident-2026-10-12-slow-mobile-link-remote-ssh-timeout.md.
-SLOW_HANDSHAKE_SECS=4
+SSH_CONNECT_TIMEOUT=$(ssh -G "$HOST" 2>/dev/null | awk '$1 == "connecttimeout" { print $2 }')
+case "$SSH_CONNECT_TIMEOUT" in
+    ''|none|*[!0-9]*) VSCODE_BUDGET_SECS=17 ;;
+    *) VSCODE_BUDGET_SECS=$((SSH_CONNECT_TIMEOUT + 2)) ;;
+esac
+SLOW_HANDSHAKE_SECS=$(( (VSCODE_BUDGET_SECS + 1) / 2 ))
 
 # Wall-clock seconds for one fresh, non-multiplexed handshake, or empty if it
 # failed. Generous timeouts on purpose: a slow-but-working link must not be
@@ -169,9 +175,9 @@ if [ "$SWAP_PRESSURE" -eq 1 ] || [ "$SLICE_PCT" -ge 90 ]; then
 fi
 
 if [ "$SLOW_LINK" -eq 1 ]; then
-    echo "SIGNATURE: slow client link -- a fresh SSH handshake took ~${FRESH_SECS}s."
-    echo "dev itself is fine; this is your network. VS Code Remote-SSH may time out"
-    echo "(its budget is ssh's ConnectTimeout + 2s, which overrides remote.SSH.connectTimeout)."
+    echo "SIGNATURE: slow client link -- a fresh SSH handshake took ~${FRESH_SECS}s of"
+    echo "VS Code Remote-SSH's ~${VSCODE_BUDGET_SECS}s connect budget (ssh ConnectTimeout + 2s)."
+    echo "dev itself is fine; this is your network. Remote-SSH may time out."
     echo "-> Switch networks if Remote-SSH won't connect. Nothing to run on dev."
     ACTION=1
 fi
