@@ -27,7 +27,7 @@ This is the formal root-cause analysis for the recurring `dev` VM incident: SSH 
 
 | Field | Value |
 |---|---|
-| Affected system | `dev` (Hetzner Cloud VM, `178.104.35.30`, Debian 13, rootless Docker) |
+| Affected system | `dev` (Hetzner Cloud VM, `<dev-ip>`, Debian 13, rootless Docker) |
 | Symptom | `Connection timed out during banner exchange` on every SSH client (OpenSSH, VS Code Remote-SSH, plain `nc`) |
 | Occurrences | 7 confirmed (5 prior, undiagnosed; 2 diagnosed — 2026-07-24 and 2026-07-28) |
 | Detection method | Manual — user noticed SSH failures; no automated alerting existed |

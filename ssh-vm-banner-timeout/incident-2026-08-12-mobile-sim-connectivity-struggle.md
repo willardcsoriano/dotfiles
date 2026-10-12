@@ -20,7 +20,7 @@ Later the same day as the company-Wi-Fi incident, `ssh dev` started failing agai
 
 ## What happened
 
-`ssh dev` began failing with `Connection timed out`, `Connection timed out during banner exchange`, and eventually `Shared connection to 178.104.35.30 closed` — all while tethered to a phone hotspot on a Smart Communications ("Magic Data") SIM. Failures persisted for over 30 minutes, ruling out a momentary blip.
+`ssh dev` began failing with `Connection timed out`, `Connection timed out during banner exchange`, and eventually `Shared connection to <dev-ip> closed` — all while tethered to a phone hotspot on a Smart Communications ("Magic Data") SIM. Failures persisted for over 30 minutes, ruling out a momentary blip.
 
 ## Ruled out: compromise
 

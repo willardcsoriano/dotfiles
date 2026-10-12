@@ -23,7 +23,7 @@ This is the living snapshot for `dotfiles`, willard's personal config repo for t
 
 **What's live and already deployed** (independent of any unpushed commit — all verified working):
 - `mba15`: `wifi-watchdog` running as a systemd `--user` service, `recon`/`check-dev`/`fix-wifi`/`reset-vscode` all in `~/.local/bin`.
-- `dev` (Hetzner, `178.104.35.30`, `nbg1`): `vscode-server-reap-orphans.timer` running every 2 minutes; Hetzner Cloud Firewall `dev-baseline-match` attached (mirrors UFW's 22/80/443+ICMP policy); `salesforce.apex-language-server-extension` uninstalled; `wfmctrading`'s three containers (`nginx`, `app`, `postgres`) currently **stopped**, ahead of a not-yet-executed migration.
+- `dev` (Hetzner, `<dev-ip>`, `nbg1`): `vscode-server-reap-orphans.timer` running every 2 minutes; Hetzner Cloud Firewall `dev-baseline-match` attached (mirrors UFW's 22/80/443+ICMP policy); `salesforce.apex-language-server-extension` uninstalled; `wfmctrading`'s three containers (`nginx`, `app`, `postgres`) currently **stopped**, ahead of a not-yet-executed migration.
 
 **A separate repo also has uncommitted docs work:** `debian-server-baselines`, branch `docs/hetzner-cloud-firewall-and-migration`, 1 commit (Hetzner Cloud Firewall + a full snapshot-based migration runbook for moving `dev` from `cx43`/Nuremberg to `cx53`/Helsinki). Not pushed.
 
