@@ -54,5 +54,5 @@ VS Code Remote-SSH to `dev` failed with `Connecting with SSH timed out` even aft
 
 ## Open items
 
-- After `fix-ssh --vscode` ran, `check-dev` showed `dev` at 86% swap with 0 windows open, while RAM had 8 GiB available. That's most likely pages that stayed in swap after the kill rather than live pressure, but `check-dev`'s swap rule flags it anyway. Re-check later; if it persists with RAM free, consider `swapoff -a && swapon -a` on `dev` (sudo, user-run) or weighting the rule on available RAM.
+- **Resolved the same day:** `check-dev` showed `dev` at 86% swap with 0 windows open while 8 GiB of RAM was available. That turned out not to be leftover pages: 10 long-idle tmux agent sessions held ~2.2 GB of swap, which is healthy. `check-dev` now treats full swap as pressure only when available RAM is low or PSI shows memory stalls (dotfiles#28). Headroom (swap 4 → 16 GB) and agent protection (OOM priority, reboot restore) are in `debian-server-baselines` `docs/agent-host.md`.
 - The Tailscale/WireGuard overlay recommended for mechanism 5 would not help here: this was bandwidth and latency, not filtering.
