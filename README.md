@@ -16,11 +16,13 @@ Settings apply immediately — no logout needed.
 - [What's included](#whats-included)
   - [Touchpad](#touchpad)
   - [VS Code Remote-SSH](#vs-code-remote-ssh)
+  - [SSH client defaults](#ssh-client-defaults)
   - [Troubleshooting aliases](#troubleshooting-aliases)
   - [Microsoft Teams (optional)](#microsoft-teams-optional)
 - [Requirements](#requirements)
 - [How it works](#how-it-works)
 - [Adding more configs](#adding-more-configs)
+- [Contributing](#contributing)
 
 ## What's included
 
@@ -117,3 +119,25 @@ This repo is meant to grow. To add a new config:
 1. Drop the file or script in a logical folder
 2. Add an install step to `install.sh`
 3. Document it here under a new section
+
+## Contributing
+
+Every change follows issue → commits → PR → review:
+
+1. **Issue.** Title it in Conventional Commits form, e.g. `fix(ssh): banner timeout on resume`. The bug, feature and incident forms prefill that shape. `issue-labeler.yml` then labels the issue from its title:
+
+   | Title | Labels |
+   |---|---|
+   | `fix` / `feat` / `docs` / `perf` | `bug` / `enhancement` / `documentation` / `performance` |
+   | `refactor`, `style`, `test`, `build`, `ci`, `chore`, `revert` | `maintenance` |
+   | `(scope)`, comma-separated allowed | `area:<scope>` |
+   | `!` before the colon | `breaking` |
+   | the word "incident" | `incident` |
+   | anything else | `needs-triage`, plus one comment explaining the format |
+
+   Retitling an issue updates its labels. Labels added by hand are never removed.
+2. **Commits.** One per concern on a feature branch, with Conventional Commits subjects.
+3. **PR.** The template opens with `Closes #`, so merging closes the issue.
+4. **Review.** `shellcheck-pr-review.yml` posts shellcheck's findings on every PR as a review. It's a record, not a merge gate.
+
+Issues track work; knowledge that should outlive it goes in this repo's docs, which the issue links to. Labeler tests: `bash .github/scripts/label-issue.test.sh`.
