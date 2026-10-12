@@ -54,6 +54,31 @@ else
     echo "Skipped: python3 not found, could not safely merge VS Code settings.json."
 fi
 
+# Install shared SSH client defaults (keep-alives, ControlMaster, and a 15s
+# ConnectTimeout that VS Code Remote-SSH also uses as its connect budget) --
+# see ssh/defaults.conf and ssh-vm-banner-timeout/configs.md. Included at the
+# END of ~/.ssh/config: ssh keeps the first value it finds, so host-specific
+# settings above it still win.
+echo "Installing SSH client defaults..."
+mkdir -p "$HOME/.ssh/config.d"
+chmod 700 "$HOME/.ssh" "$HOME/.ssh/config.d"
+curl -fsSL "$REPO_RAW/ssh/defaults.conf" -o "$HOME/.ssh/config.d/dotfiles-defaults.conf"
+chmod 600 "$HOME/.ssh/config.d/dotfiles-defaults.conf"
+[ -f "$HOME/.ssh/config" ] || (umask 077 && : > "$HOME/.ssh/config")
+if ! grep -q 'config.d/dotfiles-defaults.conf' "$HOME/.ssh/config"; then
+    cat >> "$HOME/.ssh/config" <<'EOF'
+
+# dotfiles: shared defaults. Keep this last -- ssh uses the first value it
+# finds, so everything above overrides these. "Match all" closes any Host
+# block above; without it the Include would apply to that host only.
+Match all
+Include ~/.ssh/config.d/dotfiles-defaults.conf
+EOF
+fi
+if ! ssh -G localhost > /dev/null 2>&1; then
+    echo "Warning: ~/.ssh/config no longer parses -- check it with: ssh -G localhost"
+fi
+
 # Install the fix-ssh utility (cleans up stale ControlMaster sockets left
 # behind by a bad disconnect; `fix-ssh --vscode [host]` also force-kills
 # orphaned vscode-server sessions on a remote host) so it's runnable as a
