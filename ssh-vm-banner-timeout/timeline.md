@@ -47,8 +47,8 @@ This is the chronological record of every fix attempted for the SSH banner-excha
 After attempt 4, running two plain `nc` tests (not SSH at all) established the actual failure point:
 
 ```
-nc -zv -w 3 178.104.35.30 22   →  succeeds, port 22 is open (TCP handshake completes)
-nc 178.104.35.30 22            →  hangs indefinitely, zero bytes returned
+nc -zv -w 3 <dev-ip> 22   →  succeeds, port 22 is open (TCP handshake completes)
+nc <dev-ip> 22            →  hangs indefinitely, zero bytes returned
 ```
 
 Because `nc` is a completely different client than either OpenSSH or VS Code's SSH implementation, and it fails identically, this ruled out every client-side theory (attempts 3 and 4) and reframed the problem as: the TCP handshake is being completed by the kernel, but nothing is ever sending application data back — which points below the SSH application layer entirely. See [`analysis.md`](analysis.md) for what that implies and the ranked hypotheses for the actual cause.
@@ -68,7 +68,7 @@ During attempt 4, `IPQoS 0x00` was added to `~/.ssh/config` on the theory that i
 /home/willard/.ssh/config: terminating, 1 bad configuration options
 ```
 
-This was never caught at the time because the follow-up test was a raw `nc 178.104.35.30 22` (which doesn't read `~/.ssh/config` at all), not `ssh -v`. So for some period, *every* SSH connection from this client was failing at config-parse time, before ever reaching the network — a self-inflicted bug layered on top of the real VM issue, discovered and fixed in this session (2026-07-24) by changing the line to `IPQoS 0`. See [`analysis.md`](analysis.md) for why the underlying "IPQoS fixes MTU blackholing" theory was technically unsound to begin with (IPQoS sets DSCP/QoS marking bits; it has no relationship to packet size or MTU).
+This was never caught at the time because the follow-up test was a raw `nc <dev-ip> 22` (which doesn't read `~/.ssh/config` at all), not `ssh -v`. So for some period, *every* SSH connection from this client was failing at config-parse time, before ever reaching the network — a self-inflicted bug layered on top of the real VM issue, discovered and fixed in this session (2026-07-24) by changing the line to `IPQoS 0`. See [`analysis.md`](analysis.md) for why the underlying "IPQoS fixes MTU blackholing" theory was technically unsound to begin with (IPQoS sets DSCP/QoS marking bits; it has no relationship to packet size or MTU).
 
 ## Attempt 6 (2026-07-24) — Live diagnosis via `hcloud`, cascade mechanism found
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-On 2026-08-12, VS Code Remote-SSH against `dev` failed even after running `fix-ssh --vscode dev` — a first for that command, since it had reliably fixed every prior connectivity incident. This time the root cause was outside `dev` entirely: a company Wi-Fi network was silently dropping most TCP connections specifically to `dev`'s IP (`178.104.35.30`, a Hetzner VPS), on every port tested, while leaving ICMP and connections to other hosts (GitHub) fully intact. `dev` itself stayed healthy throughout — confirmed out-of-band via `hcloud server metrics` without needing SSH at all. Switching to a mobile hotspot resolved it immediately. Along the way, diagnosis also surfaced a real, separate bug in `fix-ssh --vscode`'s remote kill command — a `pkill -f` self-match that can silently kill its own invoking shell mid-script — which is documented here but not yet patched.
+On 2026-08-12, VS Code Remote-SSH against `dev` failed even after running `fix-ssh --vscode dev` — a first for that command, since it had reliably fixed every prior connectivity incident. This time the root cause was outside `dev` entirely: a company Wi-Fi network was silently dropping most TCP connections specifically to `dev`'s IP (`<dev-ip>`, a Hetzner VPS), on every port tested, while leaving ICMP and connections to other hosts (GitHub) fully intact. `dev` itself stayed healthy throughout — confirmed out-of-band via `hcloud server metrics` without needing SSH at all. Switching to a mobile hotspot resolved it immediately. Along the way, diagnosis also surfaced a real, separate bug in `fix-ssh --vscode`'s remote kill command — a `pkill -f` self-match that can silently kill its own invoking shell mid-script — which is documented here but not yet patched.
 
 ## Table of Contents
 
@@ -22,11 +22,11 @@ VS Code Remote-SSH against `dev` stopped connecting. Terminal SSH still worked i
 
 **First symptom — a genuinely new failure shape:** the newest `Remote - SSH` log showed the connection succeeding, then hanging forever on `"Waiting for subshell to start"` — the shared `ptyHost` process wedged on spawning a *new* terminal, while existing terminal shells from hours earlier kept working. This is the same family as the 2026-08-05 incident (a long-lived shared process wedging on new work while continuing to serve old work) but in a different subsystem (`ptyHost` vs. the agent host's connection handshake).
 
-Running `fix-ssh --vscode dev` directly and verifying via `pgrep` confirmed the kill actually worked this time (12 matching processes → 0). But the very next VS Code reconnect attempt failed differently: `ssh: connect to host 178.104.35.30 port 22: Connection timed out` — a real TCP-level failure, not an application hang.
+Running `fix-ssh --vscode dev` directly and verifying via `pgrep` confirmed the kill actually worked this time (12 matching processes → 0). But the very next VS Code reconnect attempt failed differently: `ssh: connect to host <dev-ip> port 22: Connection timed out` — a real TCP-level failure, not an application hang.
 
 **Second symptom — this is where it stopped being a `dev`-side problem.** Repeated plain `ssh dev` attempts failed intermittently (roughly 1-in-5 to 1-in-3, not consistently). Ruling out each layer in order:
 
-- `ping -c 20` to `178.104.35.30`: **0% loss**, clean ~200ms RTT — ICMP was never the problem.
+- `ping -c 20` to `<dev-ip>`: **0% loss**, clean ~200ms RTT — ICMP was never the problem.
 - `hcloud server metrics dev --type cpu` (out-of-band, no SSH needed): only two brief CPU spikes in the prior 15 minutes, both already back to baseline (~7-11%) — the VM itself was not overloaded.
 - 10x raw TCP connects to `dev:22`: mostly failed (as few as 1/10 succeeding in one burst).
 - 8x raw TCP connects to `dev:443` (same host, different port): **8/8 failed** — ruled out "SSH specifically is blocked."

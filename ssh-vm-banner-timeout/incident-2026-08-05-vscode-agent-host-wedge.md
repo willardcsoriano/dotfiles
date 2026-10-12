@@ -33,7 +33,7 @@ As expected per the tool's documented behavior, this also dropped the one alread
 
 ## Unrelated finding: post-fix lag was a bad network, not the fix
 
-Right after reconnecting, the session felt laggy. Two candidate explanations existed: (1) the fresh agent host's extension hosts and language servers cold-starting from zero, or (2) a newly-joined network with a bad path to `dev`. A direct ping test settled it: **50% packet loss, ~270ms RTT** to `178.104.35.30` on the new network — a real, separate problem with that network's route to Hetzner, unrelated to `vscode-server` and not fixable by restarting anything on either end. Worth keeping distinct: not every symptom reported right after a fix is caused by the same root cause as the fix.
+Right after reconnecting, the session felt laggy. Two candidate explanations existed: (1) the fresh agent host's extension hosts and language servers cold-starting from zero, or (2) a newly-joined network with a bad path to `dev`. A direct ping test settled it: **50% packet loss, ~270ms RTT** to `<dev-ip>` on the new network — a real, separate problem with that network's route to Hetzner, unrelated to `vscode-server` and not fixable by restarting anything on either end. Worth keeping distinct: not every symptom reported right after a fix is caused by the same root cause as the fix.
 
 ## Open question: why did the agent host wedge?
 
