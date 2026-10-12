@@ -55,6 +55,8 @@ sudo systemctl start ssh.service
 
 ## 3. Client: `~/.ssh/config`
 
+**Tracked since 2026-10-12:** the `Host *` defaults below live in [`ssh/defaults.conf`](../ssh/defaults.conf). `install.sh` includes that file at the end of `~/.ssh/config`, so host-specific settings in `config.local` still override it. Before that, they existed only in each machine's untracked `~/.ssh/config`, so a new machine silently lost them, including the `ConnectTimeout` that sets VS Code Remote-SSH's connect budget. On mba15 the hand-written block was removed after migrating (backup `~/.ssh/config.bak-pre-dotfiles-defaults`). `ssh -G` output was identical for every configured host before and after.
+
 **Before:**
 
 ```sshconfig

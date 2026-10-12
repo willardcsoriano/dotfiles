@@ -42,6 +42,14 @@ Turns on VS Code's own reconnect handling for Remote-SSH sessions instead of lea
 - **Local server enabled** — `remote.SSH.useLocalServer` lets VS Code manage a local proxy process for cleaner reconnects
 - Merged into `~/.config/Code/User/settings.json` without touching your other settings
 
+### SSH client defaults
+
+Shared `Host *` defaults live in [`ssh/defaults.conf`](ssh/defaults.conf): keep-alives, `ConnectionAttempts 5`, `ControlMaster`, and `ConnectTimeout 15`. That last one matters for VS Code too, because Remote-SSH uses it + 2s as its whole connect budget.
+
+- Installed to `~/.ssh/config.d/dotfiles-defaults.conf` and included at the **end** of `~/.ssh/config`, behind a `Match all`. ssh keeps the first value it finds, so any host-specific setting above it (or in an included file such as `config.local`) still wins.
+- Idempotent: the `Include` is appended once. An existing `~/.ssh/config` is never rewritten, only appended to.
+- On a machine that already has these options in a hand-written `Host *` block at the top, delete that block after installing, or it keeps overriding the tracked file.
+
 ### Troubleshooting aliases
 
 Installed to `~/.local/bin/` by `install.sh`. **Don't know which one to run? Run `recon` first** — it checks everything below plus the `dev` VM and tells you exactly what to run next. It works fully offline (no network, no agent) since it only reads local state, which is the point: it exists because of an incident where the network itself was down and there was no way to ask anything what to run. See [`notes/wifi-driver-lockup-2026-08-21.md`](notes/wifi-driver-lockup-2026-08-21.md).
