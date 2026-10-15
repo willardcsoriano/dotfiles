@@ -40,13 +40,13 @@ Default XFCE touchpad settings are painful — slow cursor and no tap-to-click, 
 
 Turns on VS Code's own reconnect handling for Remote-SSH sessions instead of leaving it on defaults.
 
-- **Connect timeout raised to 15s** — `remote.SSH.connectTimeout` gives slow or waking remote hosts enough time to answer before VS Code gives up. Remote-SSH ignores this setting whenever `~/.ssh/config` sets `ConnectTimeout` for the host and uses that value + 2s instead, so keep `ConnectTimeout` there at 15 or more too
+- **Connect timeout raised to 15s** — `remote.SSH.connectTimeout` gives slow or waking remote hosts enough time to answer before VS Code gives up. Remote-SSH ignores this setting whenever `~/.ssh/config` sets `ConnectTimeout` for the host and uses that value + 2s instead, so `ConnectTimeout` in [`ssh/defaults.conf`](ssh/defaults.conf) is the value that actually counts
 - **Local server enabled** — `remote.SSH.useLocalServer` lets VS Code manage a local proxy process for cleaner reconnects
 - Merged into `~/.config/Code/User/settings.json` without touching your other settings
 
 ### SSH client defaults
 
-Shared `Host *` defaults live in [`ssh/defaults.conf`](ssh/defaults.conf): keep-alives, `ConnectionAttempts 5`, `ControlMaster`, and `ConnectTimeout 15`. That last one matters for VS Code too, because Remote-SSH uses it + 2s as its whole connect budget.
+Shared `Host *` defaults live in [`ssh/defaults.conf`](ssh/defaults.conf): keep-alives, `ConnectionAttempts 5`, `ControlMaster`, and `ConnectTimeout 30`. That last one matters for VS Code too, because Remote-SSH uses it + 2s as its whole connect budget (32s). It was raised from 15 after fresh logins over lossy mobile data took up to 18.3s. The cost: `ssh` to a host that silently drops connections takes longer to give up.
 
 - Installed to `~/.ssh/config.d/dotfiles-defaults.conf` and included at the **end** of `~/.ssh/config`, behind a `Match all`. ssh keeps the first value it finds, so any host-specific setting above it (or in an included file such as `config.local`) still wins.
 - Idempotent: the `Include` is appended once. An existing `~/.ssh/config` is never rewritten, only appended to.
