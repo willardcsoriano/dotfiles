@@ -28,11 +28,14 @@ SLOW_HANDSHAKE_SECS=$(( (VSCODE_BUDGET_SECS + 1) / 2 ))
 
 # Wall-clock seconds for one fresh, non-multiplexed handshake, or empty if it
 # failed. Generous timeouts on purpose: a slow-but-working link must not be
-# misread as a dead VM or a zombie ControlMaster.
+# misread as a dead VM or a zombie ControlMaster. Probes inherit the host's
+# own ConnectTimeout and get Remote-SSH's whole budget plus slack, so
+# raising ConnectTimeout in ssh config can't leave a stale cap here.
+PROBE_TIMEOUT_SECS=$(( VSCODE_BUDGET_SECS + 3 ))
 fresh_handshake_secs() {
     local start end
     start=$(date +%s%N)
-    timeout 20 ssh -o ControlPath=none -o ConnectTimeout=15 -o BatchMode=yes "$HOST" true </dev/null 2>/dev/null || return 1
+    timeout "$PROBE_TIMEOUT_SECS" ssh -o ControlPath=none -o BatchMode=yes "$HOST" true </dev/null 2>/dev/null || return 1
     end=$(date +%s%N)
     echo $(( (end - start) / 1000000000 ))
 }
@@ -45,7 +48,7 @@ CTL_PATH=$(ssh -G "$HOST" 2>/dev/null | awk '$1 == "controlpath" { print $2 }')
 HAD_MASTER=0
 [ -n "$CTL_PATH" ] && [ "$CTL_PATH" != "none" ] && [ -S "$CTL_PATH" ] && HAD_MASTER=1
 
-if ! timeout 20 ssh -o ConnectTimeout=15 -o BatchMode=yes "$HOST" true </dev/null 2>/dev/null; then
+if ! timeout "$PROBE_TIMEOUT_SECS" ssh -o BatchMode=yes "$HOST" true </dev/null 2>/dev/null; then
     # A failure here could mean dev is actually down, the local ControlMaster
     # to dev is a zombie (see dotfiles/notes/ssh-controlmaster-zombie-after-resume.md
     # -- ssh -O check misleadingly reports it "alive"), or the client network is
