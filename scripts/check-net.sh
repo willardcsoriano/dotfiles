@@ -146,8 +146,8 @@ main() {
             echo "GOOD -- Remote-SSH should connect normally." ;;
         MARGINAL)
             echo "MARGINAL -- a fresh Remote-SSH connect may time out."
-            echo "-> Run 'ssh $host true' first: VS Code then reuses that connection and skips the slow login."
-            echo "   Or use 'ssh $host' + tmux, which has no time limit." ;;
+            echo "-> Retry Remote-SSH: each attempt is a new login, and most get through on this link."
+            echo "   If it fails twice, use 'ssh $host' + tmux, which has no time limit." ;;
         POOR)
             echo "POOR -- Remote-SSH will likely time out."
             echo "-> Use 'ssh $host' + tmux until the link improves, or switch networks." ;;
