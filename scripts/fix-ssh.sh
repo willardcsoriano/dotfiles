@@ -27,16 +27,30 @@ set -euo pipefail
 #                                   reliability bugs
 #                                   (microsoft/vscode-remote-release#10388).
 #                                   See ssh-vm-banner-timeout/self-healing.md
-#                                   for the incident this covers.
+#                                   for the incident this covers. Its own
+#                                   login is a fresh one, so it also warns
+#                                   when that login shows the link, not dev,
+#                                   is the problem (2026-10-14).
 
 # A session through a working master needs one round trip; one that hasn't
 # started in this long is stalled.
 SESSION_PROBE_SECS=10
 
+# VS Code Remote-SSH's connect budget: the host's ssh ConnectTimeout + 2s,
+# or 17s when unset. Same derivation as check-dev and check-net.
+vscode_budget_secs() {
+    local ct
+    ct=$(ssh -G "$1" 2>/dev/null | awk '$1 == "connecttimeout" { print $2 }')
+    case "$ct" in
+        ''|none|*[!0-9]*) echo 17 ;;
+        *) echo $(( ct + 2 )) ;;
+    esac
+}
 
 kill_remote_vscode_server() {
-    local host="${1:-dev}"
+    local host="${1:-dev}" start secs budget
     echo "Killing vscode-server processes on $host..."
+    start=$SECONDS
     # The [.] (not \.) is deliberate: pkill -f matches against the FULL
     # command line, including the invoking shell's own — since this whole
     # script is passed to the remote as one argument, a literal "\." here
@@ -50,6 +64,14 @@ kill_remote_vscode_server() {
       find /tmp/user/1000 -maxdepth 1 -name "code-*" -type s -delete 2>/dev/null || true
       echo "Done."
     '
+    secs=$(( SECONDS - start ))
+    budget=$(vscode_budget_secs "$host")
+    if [ "$secs" -ge $(( (budget + 1) / 2 )) ]; then
+        echo ""
+        echo "Warning: that login took ${secs}s of VS Code's ${budget}s budget -- your link is the"
+        echo "problem, not $host. Killing the server can't fix a slow link, and the next connect"
+        echo "now has to start a new one. Don't run this again; run check-net instead."
+    fi
 }
 
 # Close a master that can't carry a session: ask it to exit, and if it's too
