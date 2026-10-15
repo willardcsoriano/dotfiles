@@ -5,19 +5,26 @@ set -uo pipefail
 # Remote-SSH to a host (default: dev). Measures packet loss and latency on
 # each hop -- your router, the internet, the host -- then times a few fresh,
 # non-multiplexed SSH logins against Remote-SSH's connect budget, and prints a
-# verdict naming the hop at fault. Never takes action and never prints the
-# host's address.
+# verdict naming the hop at fault. Also sends one session through any
+# existing shared connection (ControlMaster) to catch one that has stalled.
+# Never takes action and never prints the host's address.
 #
 # Built after the 2026-10-14 slow-link incident (phone data while driving),
 # where Remote-SSH timed out at its 17s budget and telling "my link is bad"
 # from "dev is broken" took several rounds of manual pings. check-dev also
 # times one handshake, but it checks VM health too; this answers only "can I
-# connect from here, and if not, whose fault is it".
+# connect from here, and if not, whose fault is it". The stalled-master check
+# covers a master frozen by suspend, which `ssh -O check` still calls alive
+# (notes/ssh-controlmaster-zombie-after-resume.md); on 2026-10-15 VS Code
+# also timed out five times with a master open, cause unconfirmed.
 #
 #   check-net [host]
 
 PINGS=20
 HANDSHAKES=3
+# A session through a working master needs one round trip, under a second
+# even on a slow link; one that hasn't answered in this long is stalled.
+SHARED_PROBE_SECS=10
 # Loss above this on any hop is enough to stall an interactive session.
 LOSS_BAD_PCT=2
 # A healthy LAN/wifi hop answers in a few ms; sustained tens of ms means the
@@ -111,9 +118,32 @@ main() {
     print_hop internet "$i"
     print_hop "$host" "$h"
 
-    # Fresh logins bypass any ControlMaster: Remote-SSH can reuse one, but a
-    # new or expired master has to pay the full handshake, which is the case
-    # that times out.
+    # `ssh -O check` only asks the local master process whether it's running,
+    # never the remote end, so it can pass a master that can no longer carry
+    # a session (frozen by suspend, or stalled on a dead link). Sessions sent
+    # through such a master, VS Code's included, hang until they time out.
+    # Send one real session through.
+    local shared=none rc
+    timeout 5 ssh -O check "$host" > /dev/null 2>&1
+    rc=$?
+    # 124: the master process itself didn't answer -- frozen, e.g. by suspend.
+    if [ "$rc" -eq 124 ]; then
+        shared=stalled
+    elif [ "$rc" -eq 0 ]; then
+        if timeout "$SHARED_PROBE_SECS" ssh -o ControlMaster=no -o BatchMode=yes "$host" true < /dev/null > /dev/null 2>&1; then
+            shared=working
+        else
+            shared=stalled
+        fi
+    fi
+    case "$shared" in
+        none)    echo "  shared connection: none open" ;;
+        working) echo "  shared connection: working" ;;
+        stalled) echo "  shared connection: STALLED (no answer in ${SHARED_PROBE_SECS}s)" ;;
+    esac
+
+    # Fresh logins bypass any ControlMaster: they measure what a new
+    # connection costs, which is what times out when no working master exists.
     local n start end ms worst=0 failed=0 times="" err why=""
     for (( n = 0; n < HANDSHAKES; n++ )); do
         start=$(date +%s%N)
@@ -141,6 +171,11 @@ main() {
     read -r hl _ <<< "$h"
     at=$(blame "$rl" "$ra" "$il" "$ia" "$hl")
 
+    if [ "$shared" = stalled ]; then
+        echo "STALLED SHARED CONNECTION -- VS Code's connects go through it and hang until they time out."
+        echo "-> ssh -O exit $host    (closes it; the next connect opens a fresh one)"
+        echo ""
+    fi
     case "$v" in
         GOOD)
             echo "GOOD -- Remote-SSH should connect normally." ;;
@@ -164,7 +199,7 @@ main() {
         echo "   Don't run 'fix-ssh --vscode': $host isn't the problem, and it makes the next connect slower."
     fi
 
-    [ "$v" = GOOD ]
+    [ "$v" = GOOD ] && [ "$shared" != stalled ]
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
