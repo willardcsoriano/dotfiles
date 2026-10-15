@@ -9,7 +9,7 @@ Two diagnosed incidents (2026-07-24, 2026-07-28) shared one blind spot: by the t
 - [Overview](#overview)
 - [Incident log](#incident-log)
 - [What's now in place](#whats-now-in-place)
-  - [1. `docker.service` StartLimitBurst — stops the crash-restart loop from forming](#1-dockerservice-startlimitburst-stops-the-crash-restart-loop-from-forming)
+  - [1. `docker.service` StartLimitBurst — stops the crash-restart loop from forming](#1-dockerservice-startlimitburst--stops-the-crash-restart-loop-from-forming)
   - [2. `netdata` email alerting](#2-netdata-email-alerting)
   - [3. Host-level memory ceiling (`user-1000.slice`)](#3-host-level-memory-ceiling-user-1000slice)
   - [4. Client-side: `ControlMaster` re-added](#4-client-side-controlmaster-re-added)
@@ -17,6 +17,7 @@ Two diagnosed incidents (2026-07-24, 2026-07-28) shared one blind spot: by the t
   - [6. Server-side: `vscode-server-reap` timer](#6-server-side-vscode-server-reap-timer)
   - [7. Client-side: agent CLI sessions moved into `tmux`](#7-client-side-agent-cli-sessions-moved-into-tmux)
   - [8. Server-side: `vscode-server-reap-orphans` timer (fast, connection-aware)](#8-server-side-vscode-server-reap-orphans-timer-fast-connection-aware)
+  - [9. Server-side: long-running agent host hardening (2026-10-12)](#9-server-side-long-running-agent-host-hardening-2026-10-12)
 - [Still a manual habit, not automated](#still-a-manual-habit-not-automated)
 - [What's still open](#whats-still-open)
 
@@ -105,6 +106,11 @@ Verified both branches live: a real master connection was correctly left alone; 
 **Fixed 2026-08-12: self-kill bug in the remote kill command.** `pkill -9 -f "\.vscode-server/"` matched not just its intended targets but the full command line of its own invoking shell (the whole 3-line remote script is passed to `ssh` as one argument, and that argument's text contains the same pattern it's searching for) — since the invoking shell's PID is always the newest/highest of the matched set, `pkill`'s numeric-order kill sequence took out the real targets first and its own parent last, silently truncating the script before `find`/`echo "Done."` ever ran. Fixed by switching the pattern to `"[.]vscode-server/"` (same bracket trick used to self-exclude `ps`/`grep` from their own output) — verified live with `pgrep` (non-destructive) that the parent shell no longer matches while every real target still does. See [`incident-2026-08-12-company-wifi-blocked-dev.md`](incident-2026-08-12-company-wifi-blocked-dev.md) for the full diagnosis.
 
 **Expect a brief load spike right after running `--vscode`, not a sign of a new problem:** force-killing a whole process tree at once (extension host, language servers, etc.) causes a short, sharp CPU/reclaim burst on `dev` — observed as a decaying 15-minute load average shortly after the 2026-08-05 fix, with the 1-minute average already back to normal by the time it was checked. Give it a few minutes to settle before treating elevated load as a separate incident.
+
+**Hardened 2026-10-15: stalled masters, and `--vscode` on a slow link** ([`incident-2026-10-14-lossy-link-stalled-master-remote-ssh.md`](incident-2026-10-14-lossy-link-stalled-master-remote-ssh.md), dotfiles#44).
+
+- **Stalled masters.** `ssh -O check` only asks the local master process whether it's running; it never touches the remote end. On a lossy link a master passed that check while every session sent through it, VS Code's included, hung until timeout. The plain form now also opens one real session through each live master and closes any that can't start one within 10s. A master too frozen to answer `-O check` within 5s is closed too: first with `ssh -O exit`, then with SIGKILL to the process listening on its socket. Only a timeout counts against a master, so a slow-but-working one is left alone. Verified against a throwaway master frozen with SIGSTOP, while the live master VS Code was using stayed untouched. A master that answers locally but whose remote end has stalled was not reproduced, because that needs packet-loss injection.
+- **`--vscode` on a slow link.** Its own login skips the shared connection, so it's a fresh one, and the command now times it. If it takes at least half of Remote-SSH's budget, it warns that the link is the problem and points at `check-net`. On 2026-10-14 it was run five times in a row on a link where it couldn't help, and each run made the next connect slower.
 
 ### 6. Server-side: `vscode-server-reap` timer
 
