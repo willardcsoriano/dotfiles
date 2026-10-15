@@ -5,10 +5,12 @@ set -euo pipefail
 #
 #   fix-ssh                        Clean up stale local ControlMaster sockets
 #                                   left behind by a bad disconnect (timeout,
-#                                   broken pipe). Safe — only ever removes a
-#                                   socket after confirming its master
-#                                   connection is actually dead via
-#                                   `ssh -O check`.
+#                                   broken pipe), and close masters that are
+#                                   still running but can no longer carry a
+#                                   session (stalled on a lossy link, or
+#                                   frozen by suspend). Safe — only ever
+#                                   closes a master after a real session
+#                                   through it fails to start in time.
 #
 #   fix-ssh --vscode [HOST]        Force-kill ALL vscode-server processes on
 #                                   HOST (default: dev). NOT safe in the same
@@ -26,6 +28,11 @@ set -euo pipefail
 #                                   (microsoft/vscode-remote-release#10388).
 #                                   See ssh-vm-banner-timeout/self-healing.md
 #                                   for the incident this covers.
+
+# A session through a working master needs one round trip; one that hasn't
+# started in this long is stalled.
+SESSION_PROBE_SECS=10
+
 
 kill_remote_vscode_server() {
     local host="${1:-dev}"
@@ -45,6 +52,23 @@ kill_remote_vscode_server() {
     '
 }
 
+# Close a master that can't carry a session: ask it to exit, and if it's too
+# frozen to answer, kill the process listening on its socket. ssh binds the
+# socket under a temporary name ("SOCKET.<random>") and links it into place,
+# so ss lists it under that name; a frozen master that ignores its control
+# socket may not handle SIGTERM either, hence SIGKILL.
+close_master() {
+    local sock=$1 pid
+    if ! timeout 5 ssh -O exit -S "$sock" x > /dev/null 2>&1; then
+        pid=$(ss -xlp 2>/dev/null | awk -v s="$sock." '
+            index($5, s) == 1 && match($0, /pid=[0-9]+/) { print substr($0, RSTART + 4, RLENGTH - 4) }')
+        if [ -n "$pid" ]; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$sock"
+}
+
 clean_local_sockets() {
     shopt -s nullglob
     local sockets=("$HOME"/.ssh/cm-*)
@@ -54,19 +78,38 @@ clean_local_sockets() {
         return 0
     fi
 
-    local removed=0
+    local removed=0 rc
     for sock in "${sockets[@]}"; do
         [ -S "$sock" ] || continue
-        if ssh -O check -S "$sock" x 2>/dev/null; then
-            echo "Live: $sock (leaving it alone)"
-        else
+        rc=0
+        timeout 5 ssh -O check -S "$sock" x > /dev/null 2>&1 || rc=$?
+        if [ "$rc" -eq 124 ]; then
+            echo "Frozen: $sock (master didn't answer; closing)"
+            close_master "$sock"
+            removed=$((removed + 1))
+            continue
+        elif [ "$rc" -ne 0 ]; then
             echo "Stale: $sock (removing)"
             rm -f "$sock"
             removed=$((removed + 1))
+            continue
+        fi
+        # -O check only reached the local master process. A master stalled on
+        # a lossy link still passes it while every session through it hangs
+        # (2026-10-15), so open a real one. Only a timeout counts as stalled:
+        # any other failure isn't evidence against the master.
+        rc=0
+        timeout "$SESSION_PROBE_SECS" ssh -S "$sock" -o ControlMaster=no -o BatchMode=yes x true < /dev/null > /dev/null 2>&1 || rc=$?
+        if [ "$rc" -eq 124 ]; then
+            echo "Stalled: $sock (no session in ${SESSION_PROBE_SECS}s; closing)"
+            close_master "$sock"
+            removed=$((removed + 1))
+        else
+            echo "Live: $sock (leaving it alone)"
         fi
     done
 
-    echo "Done. Removed $removed stale socket(s)."
+    echo "Done. Closed or removed $removed socket(s)."
 }
 
 if [ "${1:-}" = "--vscode" ]; then
