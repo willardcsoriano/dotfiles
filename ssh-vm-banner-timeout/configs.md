@@ -80,11 +80,11 @@ Host *
     ConnectionAttempts 5
     IPQoS 0
     ControlMaster auto
-    ControlPath ~/.ssh/cm-%h
+    ControlPath ~/.ssh/cm-%r@%h:%p
     ControlPersist 2h
 ```
 
-Multiplexing was removed once (`timeline.md` attempt 3, after `ControlPath` changed from `~/.ssh/cm-%r@%h:%p` to `~/.ssh/cm-%h` while chasing a stale-socket bug) and then deliberately re-added on 2026-07-29 — see `self-healing.md`. The zombie-master-after-suspend failure it can cause is handled by the `ssh-control-reset` sleep hook. `ConnectionAttempts 5` was added on 2026-08-12 (`incident-2026-08-12-mobile-sim-connectivity-struggle.md`).
+Multiplexing was removed once (`timeline.md` attempt 3, after `ControlPath` changed from `~/.ssh/cm-%r@%h:%p` to `~/.ssh/cm-%h` while chasing a stale-socket bug) and then deliberately re-added on 2026-07-29 — see `self-healing.md`. On 2026-10-20 the path went back to `~/.ssh/cm-%r@%h:%p`: with `%h` alone, two users on one host share a socket, so `ssh v@box` silently ran over an open `root@box` master as root. The zombie-master-after-suspend failure it can cause is handled by the `ssh-control-reset` sleep hook. `ConnectionAttempts 5` was added on 2026-08-12 (`incident-2026-08-12-mobile-sim-connectivity-struggle.md`).
 
 `ConnectTimeout` was raised from 5 to 15 on 2026-10-12. VS Code Remote-SSH reads this value, adds 2s, and uses the result as its whole connect budget, overriding `remote.SSH.connectTimeout`. At 5, it gave up after 7s, which a slow mobile link can't meet (`incident-2026-10-12-slow-mobile-link-remote-ssh-timeout.md`). The cost is that a plain `ssh` to a truly dead host now waits up to 15s per attempt before failing.
 
