@@ -122,7 +122,10 @@ mkdir -p "$HOME/.config/systemd/user"
 curl -fsSL "$REPO_RAW/etc/systemd/user/wifi-watchdog.service" -o "$HOME/.config/systemd/user/wifi-watchdog.service"
 if command -v systemctl > /dev/null 2>&1; then
     systemctl --user daemon-reload
-    systemctl --user enable --now wifi-watchdog.service
+    systemctl --user enable wifi-watchdog.service
+    # restart, not just --now: on a re-run the old script keeps running
+    # until the next login otherwise, so a fix to it never takes effect.
+    systemctl --user restart wifi-watchdog.service
 fi
 
 # Install the recon utility (runs every local diagnostic -- wifi, SSH
