@@ -18,7 +18,9 @@ set -uo pipefail
 # below NetworkManager's own retries, so a lockup like that clears itself
 # without needing a manual command or a reboot. No sudo required: toggling
 # the wifi radio is a normal NetworkManager permission for the logged-in
-# user (org.freedesktop.NetworkManager.enable-disable-wifi).
+# user (org.freedesktop.NetworkManager.enable-disable-wifi) -- but only
+# while their session is the active one. With the screen locked the reset
+# is deferred until it is allowed again; see radio_toggle_authorized.
 #
 # Deliberately does NOT escalate further (no driver reload, no reboot) if
 # the radio reset doesn't clear it -- just notifies and waits for the next
@@ -45,53 +47,101 @@ radio_enabled() {
     [ "$(nmcli radio wifi 2>/dev/null)" = "enabled" ]
 }
 
+# NetworkManager's own answer to "may this session toggle the radio right
+# now?". enable-disable-wifi is allow_active=yes / allow_inactive=no, so it
+# reads "no" while the screen is locked (light-locker switches to the
+# greeter VT and the session goes inactive). Asking first means the
+# watchdog never starts a reset polkit will refuse halfway through -- the
+# 2026-10-06 incident was exactly that: "off" landed, "on" was refused.
+# "auth" counts as not allowed too: a background service has nobody to
+# answer a password prompt. See
+# notes/wifi-watchdog-resume-polkit-race-disables-radio.md.
+radio_toggle_authorized() {
+    nmcli -t -f PERMISSION,VALUE general permissions 2>/dev/null \
+        | grep -qx 'org.freedesktop.NetworkManager.enable-disable-wifi:yes'
+}
+
+# The systemd user manager's PATH doesn't include ~/.local/bin, so a plain
+# `command -v fix-wifi` fails inside the service. install.sh puts both
+# scripts in the same directory, so look next to this one first.
+find_fix_wifi() {
+    local sibling
+    sibling="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/fix-wifi"
+    if [ -x "$sibling" ]; then
+        printf '%s\n' "$sibling"
+    else
+        command -v fix-wifi
+    fi
+}
+
 notify() {
-    command -v notify-send > /dev/null 2>&1 && notify-send -u normal "Wifi auto-recovery" "$1" || true
+    if command -v notify-send > /dev/null 2>&1; then
+        notify-send -u normal "Wifi auto-recovery" "$1" || true
+    fi
 }
 
 fail_count=0
 last_trigger=0
+deferred=false
 
-while true; do
-    sleep "$POLL_INTERVAL_SECONDS"
+poll_once() {
+    local dev now stuck_for fix_wifi
 
     dev="$(wifi_device)"
     if [ -z "$dev" ] || ! radio_enabled; then
         fail_count=0
-        continue
+        deferred=false
+        return 0
     fi
 
     if is_connected "$dev"; then
         fail_count=0
-        continue
+        deferred=false
+        return 0
     fi
 
     fail_count=$((fail_count + 1))
     now=$(date +%s)
-
-    if [ "$fail_count" -ge "$FAILURE_THRESHOLD" ] && [ $((now - last_trigger)) -ge "$COOLDOWN_SECONDS" ]; then
-        stuck_for=$((fail_count * POLL_INTERVAL_SECONDS))
-        echo "wifi-watchdog: $dev stuck disconnected for ~${stuck_for}s, running radio reset..."
-        radio_ok=true
-        if command -v fix-wifi > /dev/null 2>&1; then
-            fix-wifi --radio || radio_ok=false
-        else
-            nmcli radio wifi off || true
-            sleep 2
-            nmcli radio wifi on || true
-            sleep 1
-            [ "$(nmcli radio wifi)" = "enabled" ] || radio_ok=false
-        fi
-        # Confirmed 2026-10-06: the re-enable call can fail outright (a polkit
-        # race right after resume), leaving the radio off with a falsely
-        # reassuring notification otherwise. See
-        # notes/wifi-watchdog-resume-polkit-race-disables-radio.md.
-        if $radio_ok; then
-            notify "$dev looked wedged for ~${stuck_for}s -- ran a radio reset (nmcli radio wifi off/on)."
-        else
-            notify "$dev looked wedged for ~${stuck_for}s -- radio reset FAILED, wifi may still be off. Run: nmcli radio wifi on"
-        fi
-        last_trigger=$now
-        fail_count=0
+    if [ "$fail_count" -lt "$FAILURE_THRESHOLD" ] || [ $((now - last_trigger)) -lt "$COOLDOWN_SECONDS" ]; then
+        return 0
     fi
-done
+    stuck_for=$((fail_count * POLL_INTERVAL_SECONDS))
+
+    # Keep fail_count while deferred, so the reset runs on the first poll
+    # after the session becomes active again if wifi is still stuck.
+    if ! radio_toggle_authorized; then
+        if ! $deferred; then
+            echo "wifi-watchdog: $dev stuck disconnected for ~${stuck_for}s, but this session may not toggle the radio right now (screen locked?) -- deferring the reset"
+            deferred=true
+        fi
+        return 0
+    fi
+    deferred=false
+    last_trigger=$now
+    fail_count=0
+
+    fix_wifi="${FIX_WIFI:-$(find_fix_wifi)}"
+    if [ -z "$fix_wifi" ]; then
+        echo "wifi-watchdog: $dev stuck disconnected for ~${stuck_for}s, but fix-wifi is not installed next to wifi-watchdog or on PATH" >&2
+        notify "$dev looked wedged for ~${stuck_for}s -- fix-wifi is missing, rerun the dotfiles install.sh."
+        return 0
+    fi
+
+    echo "wifi-watchdog: $dev stuck disconnected for ~${stuck_for}s, running radio reset..."
+    if "$fix_wifi" --radio; then
+        notify "$dev looked wedged for ~${stuck_for}s -- ran a radio reset (nmcli radio wifi off/on)."
+    else
+        notify "$dev looked wedged for ~${stuck_for}s -- radio reset FAILED, wifi may still be off. Run: nmcli radio wifi on"
+    fi
+}
+
+main() {
+    while true; do
+        sleep "$POLL_INTERVAL_SECONDS"
+        poll_once
+    done
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
+fi
