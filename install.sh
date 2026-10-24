@@ -158,6 +158,16 @@ if ! command -v check-dev > /dev/null 2>&1; then
     echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'check-dev' directly, or run \$HOME/.local/bin/check-dev."
 fi
 
+# Install the check-net utility (advisory-only: grades whether the current
+# network can carry VS Code Remote-SSH to dev, and names the hop at fault --
+# router, internet, or the route to dev; never takes action itself).
+echo "Installing check-net to \$HOME/.local/bin..."
+curl -fsSL "$REPO_RAW/scripts/check-net.sh" -o "$HOME/.local/bin/check-net"
+chmod +x "$HOME/.local/bin/check-net"
+if ! command -v check-net > /dev/null 2>&1; then
+    echo "Note: \$HOME/.local/bin isn't on your PATH yet — add it to use 'check-net' directly, or run \$HOME/.local/bin/check-net."
+fi
+
 # Install tmux + config. Long-running CLI agent sessions belong in tmux, not
 # a raw shell (survives disconnects/vscode-server churn on remote hosts, and
 # fixes mouse-wheel scroll landing in a foreground app's own UI instead of

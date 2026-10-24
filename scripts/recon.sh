@@ -3,8 +3,8 @@ set -uo pipefail
 
 # Single entry point for "something's wrong, what do I run?" -- runs every
 # known local diagnostic (wifi, SSH ControlMaster, VS Code hang) plus the
-# dev VM check, and prints a diagnosis with the exact alias to run next for
-# each. Advisory only, like check-dev: never takes action itself.
+# link-to-dev and dev VM checks, and prints a diagnosis with the exact alias
+# to run next for each. Advisory only, like check-dev: never takes action itself.
 #
 # Built after the 2026-08-21 wifi driver lockup incident, where the actual
 # blocker wasn't a missing fix -- it was not being able to reach an agent to
@@ -12,9 +12,9 @@ set -uo pipefail
 # runs offline, entirely from local state, so it works precisely when that
 # matters most.
 #
-#   recon           Run all checks (local + dev VM).
-#   recon --no-dev   Skip the dev VM check (it needs a network path to
-#                    reach dev; local checks always run regardless).
+#   recon           Run all checks (local + link to dev + dev VM).
+#   recon --no-dev   Skip the link and dev VM checks (they need a network
+#                    path to reach dev; local checks always run regardless).
 
 RUN_DEV=1
 [ "${1:-}" = "--no-dev" ] && RUN_DEV=0
@@ -101,6 +101,17 @@ check_vscode() {
     fi
 }
 
+check_link() {
+    echo "[link]"
+    if ! command -v check-net > /dev/null 2>&1; then
+        echo "  check-net not on PATH -- skipping"
+        return
+    fi
+    if ! check-net; then
+        ISSUES=1
+    fi
+}
+
 check_dev_vm() {
     echo "[dev]"
     if ! command -v check-dev > /dev/null 2>&1; then
@@ -120,6 +131,8 @@ check_ssh
 echo ""
 check_vscode
 if [ "$RUN_DEV" -eq 1 ]; then
+    echo ""
+    check_link
     echo ""
     check_dev_vm
 fi
