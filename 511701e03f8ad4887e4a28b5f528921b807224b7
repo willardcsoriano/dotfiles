@@ -1,0 +1,1 @@
+Correction (2026-10-24): this message presents "a master stalled on a lossy link (2026-10-15)" as the cause. That was never confirmed (see the 2026-10-14 incident write-up). The probe guards against a real failure mode: ssh -O check passes a master whose remote end has stalled. It is not a confirmed fix for that incident. Corrected in b931b6e and 7393d68; #44.
