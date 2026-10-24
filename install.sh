@@ -79,6 +79,13 @@ if ! ssh -G localhost > /dev/null 2>&1; then
     echo "Warning: ~/.ssh/config no longer parses -- check it with: ssh -G localhost"
 fi
 
+# Install vscode-ssh-budget (prints how long VS Code Remote-SSH waits for a
+# connect; fix-ssh, check-dev and check-net grade logins against it).
+echo "Installing vscode-ssh-budget to \$HOME/.local/bin..."
+mkdir -p "$HOME/.local/bin"
+curl -fsSL "$REPO_RAW/scripts/vscode-ssh-budget.sh" -o "$HOME/.local/bin/vscode-ssh-budget"
+chmod +x "$HOME/.local/bin/vscode-ssh-budget"
+
 # Install the fix-ssh utility (cleans up stale ControlMaster sockets left
 # behind by a bad disconnect; `fix-ssh --vscode [host]` also force-kills
 # orphaned vscode-server sessions on a remote host) so it's runnable as a

@@ -38,7 +38,7 @@ VS Code Remote-SSH to `dev` failed with `Connecting with SSH timed out` even aft
 | Fresh non-multiplexed handshake | 4.4–5.5 s | — this is the cause |
 | `curl` 5 MB download | ~89 KB/s, did not finish in 20 s | — confirms a slow link |
 
-**Where 7 s comes from.** In `ms-vscode-remote.remote-ssh-0.128.0/out/extension.js`, `connectTimeoutMilliseconds` starts from `remote.SSH.connectTimeout` (default 15) but replaces it with the host's ssh `ConnectTimeout` when one is set, then adds 2 s. `~/.ssh/config`'s `Host *` block had `ConnectTimeout 5`, inherited from the original baseline with no recorded rationale. The `remote.SSH.connectTimeout: 15` that this repo's `vscode/settings.json` installs had never taken effect.
+**Where 7 s comes from.** In `ms-vscode-remote.remote-ssh-0.128.0/out/extension.js`, `connectTimeoutMilliseconds` starts from `remote.SSH.connectTimeout` (default 15) but replaces it with the host's ssh `ConnectTimeout` when one is set, then adds 2 s. `~/.ssh/config`'s `Host *` block had `ConnectTimeout 5`, inherited from the original baseline with no recorded rationale. The `remote.SSH.connectTimeout: 15` that this repo's `vscode/settings.json` installs had never taken effect. (That held only while `ConnectTimeout` sat directly in `~/.ssh/config`. The extension doesn't follow `Include`, so once the defaults moved into an included file the setting became the budget again. See `incident-2026-10-24-login-grace-and-vscode-budget-remote-ssh.md`.)
 
 **Why `recon` was wrong.** `check-dev` probed with a 6 s hard timeout, then retried without multiplexing using an 8 s one. On a ~5.5 s link the first probe failed and the second succeeded, which the script read as "zombie ControlMaster" without checking whether a master existed.
 

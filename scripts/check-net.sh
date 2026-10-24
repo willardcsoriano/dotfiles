@@ -34,16 +34,28 @@ INTERNET_AVG_BAD_MS=250
 # Anycast resolver used only as a ping target for "the internet in general".
 INTERNET_REF="${CHECK_NET_REF:-1.1.1.1}"
 
-# Remote-SSH's connect budget in ms: the host's ssh ConnectTimeout + 2s, which
-# overrides remote.SSH.connectTimeout; 17s when ConnectTimeout is unset (that
-# setting's default, 15, + 2). Same derivation as check-dev.
+# vscode-ssh-budget sits next to this script, both in the repo (*.sh) and
+# once installed to ~/.local/bin (no suffix); PATH is the last resort.
+vscode_ssh_budget() {
+    local dir cand
+    dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    for cand in "$dir/vscode-ssh-budget.sh" "$dir/vscode-ssh-budget"; do
+        [ -x "$cand" ] && { "$cand" "$@"; return; }
+    done
+    if command -v vscode-ssh-budget > /dev/null 2>&1; then
+        vscode-ssh-budget "$@"
+        return
+    fi
+    echo "vscode-ssh-budget not found -- re-run install.sh" >&2
+    return 1
+}
+
+# Remote-SSH's connect budget in ms (see vscode-ssh-budget for how VS Code
+# derives it; `ssh -G` can disagree because the extension skips Include).
 budget_ms() {
-    local ct
-    ct=$(ssh -G "$1" 2>/dev/null | awk '$1 == "connecttimeout" { print $2 }')
-    case "$ct" in
-        ''|none|*[!0-9]*) echo 17000 ;;
-        *) echo $(( (ct + 2) * 1000 )) ;;
-    esac
+    local secs
+    secs=$(vscode_ssh_budget "$1") || return 1
+    echo $(( secs * 1000 ))
 }
 
 # "LOSS AVG MAX" (integers; loss in %, times in ms) for ping output on stdin,
@@ -98,7 +110,7 @@ main() {
     local target gateway budget
     target=$(ssh -G "$host" 2>/dev/null | awk '$1 == "hostname" { print $2 }')
     gateway=$(ip route show default 2>/dev/null | awk '{ print $3; exit }')
-    budget=$(budget_ms "$host")
+    budget=$(budget_ms "$host") || return 2
     TMP=$(mktemp -d)
     trap 'rm -rf "$TMP"' EXIT
 
