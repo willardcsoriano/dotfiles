@@ -14,25 +14,39 @@ TIMEOUT=8
 
 q() { timeout "$TIMEOUT" ssh -o ConnectTimeout=5 -o BatchMode=yes "$HOST" "$1" 2>/dev/null; }
 
-# VS Code Remote-SSH's connect budget is the host's ssh ConnectTimeout + 2s
-# (that overrides remote.SSH.connectTimeout; with no ConnectTimeout set it falls
-# back to that setting's default, 15), and the remote server must also start
-# inside the window. Flag a fresh handshake that uses half the budget -- see
+# vscode-ssh-budget sits next to this script, both in the repo (*.sh) and
+# once installed to ~/.local/bin (no suffix); PATH is the last resort.
+vscode_ssh_budget() {
+    local dir cand
+    dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    for cand in "$dir/vscode-ssh-budget.sh" "$dir/vscode-ssh-budget"; do
+        [ -x "$cand" ] && { "$cand" "$@"; return; }
+    done
+    if command -v vscode-ssh-budget > /dev/null 2>&1; then
+        vscode-ssh-budget "$@"
+        return
+    fi
+    echo "vscode-ssh-budget not found -- re-run install.sh" >&2
+    return 1
+}
+
+# VS Code Remote-SSH's connect budget (vscode-ssh-budget has the derivation),
+# and the remote server must also start inside the window. Flag a fresh
+# handshake that uses half the budget -- see
 # incident-2026-10-12-slow-mobile-link-remote-ssh-timeout.md.
-SSH_CONNECT_TIMEOUT=$(ssh -G "$HOST" 2>/dev/null | awk '$1 == "connecttimeout" { print $2 }')
-case "$SSH_CONNECT_TIMEOUT" in
-    ''|none|*[!0-9]*) VSCODE_BUDGET_SECS=17 ;;
-    *) VSCODE_BUDGET_SECS=$((SSH_CONNECT_TIMEOUT + 2)) ;;
-esac
+VSCODE_BUDGET_SECS=$(vscode_ssh_budget "$HOST") || exit 2
 SLOW_HANDSHAKE_SECS=$(( (VSCODE_BUDGET_SECS + 1) / 2 ))
 
 # Wall-clock seconds for one fresh, non-multiplexed handshake, or empty if it
 # failed. Generous timeouts on purpose: a slow-but-working link must not be
-# misread as a dead VM or a zombie ControlMaster.
+# misread as a dead VM or a zombie ControlMaster. Probes inherit the host's
+# own ConnectTimeout and get Remote-SSH's whole budget plus slack, so
+# raising ConnectTimeout in ssh config can't leave a stale cap here.
+PROBE_TIMEOUT_SECS=$(( VSCODE_BUDGET_SECS + 3 ))
 fresh_handshake_secs() {
     local start end
     start=$(date +%s%N)
-    timeout 20 ssh -o ControlPath=none -o ConnectTimeout=15 -o BatchMode=yes "$HOST" true </dev/null 2>/dev/null || return 1
+    timeout "$PROBE_TIMEOUT_SECS" ssh -o ControlPath=none -o BatchMode=yes "$HOST" true </dev/null 2>/dev/null || return 1
     end=$(date +%s%N)
     echo $(( (end - start) / 1000000000 ))
 }
@@ -45,7 +59,7 @@ CTL_PATH=$(ssh -G "$HOST" 2>/dev/null | awk '$1 == "controlpath" { print $2 }')
 HAD_MASTER=0
 [ -n "$CTL_PATH" ] && [ "$CTL_PATH" != "none" ] && [ -S "$CTL_PATH" ] && HAD_MASTER=1
 
-if ! timeout 20 ssh -o ConnectTimeout=15 -o BatchMode=yes "$HOST" true </dev/null 2>/dev/null; then
+if ! timeout "$PROBE_TIMEOUT_SECS" ssh -o BatchMode=yes "$HOST" true </dev/null 2>/dev/null; then
     # A failure here could mean dev is actually down, the local ControlMaster
     # to dev is a zombie (see dotfiles/notes/ssh-controlmaster-zombie-after-resume.md
     # -- ssh -O check misleadingly reports it "alive"), or the client network is
@@ -176,7 +190,7 @@ fi
 
 if [ "$SLOW_LINK" -eq 1 ]; then
     echo "SIGNATURE: slow client link -- a fresh SSH handshake took ~${FRESH_SECS}s of"
-    echo "VS Code Remote-SSH's ~${VSCODE_BUDGET_SECS}s connect budget (ssh ConnectTimeout + 2s)."
+    echo "VS Code Remote-SSH's ~${VSCODE_BUDGET_SECS}s connect budget."
     echo "dev itself is fine; this is your network. Remote-SSH may time out."
     echo "-> Switch networks if Remote-SSH won't connect. Nothing to run on dev."
     ACTION=1

@@ -76,7 +76,7 @@ Host *
     AddKeysToAgent yes
     ServerAliveInterval 10
     ServerAliveCountMax 3
-    ConnectTimeout 15
+    ConnectTimeout 30
     ConnectionAttempts 5
     IPQoS 0
     ControlMaster auto
@@ -86,7 +86,9 @@ Host *
 
 Multiplexing was removed once (`timeline.md` attempt 3, after `ControlPath` changed from `~/.ssh/cm-%r@%h:%p` to `~/.ssh/cm-%h` while chasing a stale-socket bug) and then deliberately re-added on 2026-07-29 — see `self-healing.md`. On 2026-10-20 the path went back to `~/.ssh/cm-%r@%h:%p`: with `%h` alone, two users on one host share a socket, so `ssh v@box` silently ran over an open `root@box` master as root. The zombie-master-after-suspend failure it can cause is handled by the `ssh-control-reset` sleep hook. `ConnectionAttempts 5` was added on 2026-08-12 (`incident-2026-08-12-mobile-sim-connectivity-struggle.md`).
 
-`ConnectTimeout` was raised from 5 to 15 on 2026-10-12. VS Code Remote-SSH reads this value, adds 2s, and uses the result as its whole connect budget, overriding `remote.SSH.connectTimeout`. At 5, it gave up after 7s, which a slow mobile link can't meet (`incident-2026-10-12-slow-mobile-link-remote-ssh-timeout.md`). The cost is that a plain `ssh` to a truly dead host now waits up to 15s per attempt before failing.
+`ConnectTimeout` was raised from 5 to 15 on 2026-10-12. At that point it sat directly in `~/.ssh/config`. VS Code Remote-SSH reads it from there, adds 2s, and uses the result as its whole connect budget in place of `remote.SSH.connectTimeout`. At 5 it gave up after 7s, which a slow mobile link can't meet (`incident-2026-10-12-slow-mobile-link-remote-ssh-timeout.md`). The same day these defaults moved into the Included `dotfiles-defaults.conf`. Remote-SSH's own config parser doesn't follow `Include`, so since then this value hasn't reached VS Code at all. VS Code's budget comes from `remote.SSH.connectTimeout` in `vscode/settings.json`, now 60 (a 62s window), and `vscode-ssh-budget` prints the value the extension will use (`incident-2026-10-24-login-grace-and-vscode-budget-remote-ssh.md`). The cost is that a plain `ssh` to a truly dead host now waits up to 15s per attempt before failing.
+
+Raised again, from 15 to 30, on 2026-10-15 (dotfiles#45). Fresh logins to `dev` over lossy mobile data took 3.5–18.3s. The raise was meant to lift Remote-SSH's 17s budget to 32s, but for the `Include` reason above it only ever applied to plain `ssh`. The VS Code half of that fix came on 2026-10-24. `ConnectTimeout` covers TCP connect, the banner and key exchange, but not authentication (`man ssh_config`), so a slow login fails Remote-SSH's budget before it ever trips ssh's own timeout. The cost doubles too: a host that silently drops TCP now takes up to 30s per attempt, and `ConnectionAttempts 5` retries a failed TCP connect, so up to about 2.5 minutes before plain `ssh` gives up. A host that refuses the connection outright still fails at once.
 
 `IPQoS` was originally set to `0x00` (invalid syntax — OpenSSH rejects the hex-prefixed form outright, which broke the SSH client entirely, for every host, not just `dev`). Fixed to the valid decimal form `IPQoS 0` on 2026-07-24. See `timeline.md` ("Self-inflicted regression") and `analysis.md` for why the underlying theory behind this line was technically unsound to begin with; it's left in place only because it's harmless, not because it's believed to matter.
 

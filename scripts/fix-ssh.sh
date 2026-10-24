@@ -5,10 +5,12 @@ set -euo pipefail
 #
 #   fix-ssh                        Clean up stale local ControlMaster sockets
 #                                   left behind by a bad disconnect (timeout,
-#                                   broken pipe). Safe — only ever removes a
-#                                   socket after confirming its master
-#                                   connection is actually dead via
-#                                   `ssh -O check`.
+#                                   broken pipe), and close masters that are
+#                                   still running but can no longer carry a
+#                                   session (stalled on a lossy link, or
+#                                   frozen by suspend). Safe — only ever
+#                                   closes a master after a real session
+#                                   through it fails to start in time.
 #
 #   fix-ssh --vscode [HOST]        Force-kill ALL vscode-server processes on
 #                                   HOST (default: dev). NOT safe in the same
@@ -25,11 +27,35 @@ set -euo pipefail
 #                                   reliability bugs
 #                                   (microsoft/vscode-remote-release#10388).
 #                                   See ssh-vm-banner-timeout/self-healing.md
-#                                   for the incident this covers.
+#                                   for the incident this covers. Its own
+#                                   login is a fresh one, so it also warns
+#                                   when that login shows the link, not dev,
+#                                   is the problem (2026-10-14).
+
+# A session through a working master needs one round trip; one that hasn't
+# started in this long is stalled.
+SESSION_PROBE_SECS=10
+
+# vscode-ssh-budget sits next to this script, both in the repo (*.sh) and
+# once installed to ~/.local/bin (no suffix); PATH is the last resort.
+vscode_ssh_budget() {
+    local dir cand
+    dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    for cand in "$dir/vscode-ssh-budget.sh" "$dir/vscode-ssh-budget"; do
+        [ -x "$cand" ] && { "$cand" "$@"; return; }
+    done
+    if command -v vscode-ssh-budget > /dev/null 2>&1; then
+        vscode-ssh-budget "$@"
+        return
+    fi
+    echo "vscode-ssh-budget not found -- re-run install.sh" >&2
+    return 1
+}
 
 kill_remote_vscode_server() {
-    local host="${1:-dev}"
+    local host="${1:-dev}" start secs budget
     echo "Killing vscode-server processes on $host..."
+    start=$SECONDS
     # The [.] (not \.) is deliberate: pkill -f matches against the FULL
     # command line, including the invoking shell's own — since this whole
     # script is passed to the remote as one argument, a literal "\." here
@@ -43,6 +69,31 @@ kill_remote_vscode_server() {
       find /tmp/user/1000 -maxdepth 1 -name "code-*" -type s -delete 2>/dev/null || true
       echo "Done."
     '
+    secs=$(( SECONDS - start ))
+    budget=$(vscode_ssh_budget "$host") || return 0
+    if [ "$secs" -ge $(( (budget + 1) / 2 )) ]; then
+        echo ""
+        echo "Warning: that login took ${secs}s of VS Code's ${budget}s budget -- your link is the"
+        echo "problem, not $host. Killing the server can't fix a slow link, and the next connect"
+        echo "now has to start a new one. Don't run this again; run check-net instead."
+    fi
+}
+
+# Close a master that can't carry a session: ask it to exit, and if it's too
+# frozen to answer, kill the process listening on its socket. ssh binds the
+# socket under a temporary name ("SOCKET.<random>") and links it into place,
+# so ss lists it under that name; a frozen master that ignores its control
+# socket may not handle SIGTERM either, hence SIGKILL.
+close_master() {
+    local sock=$1 pid
+    if ! timeout 5 ssh -O exit -S "$sock" x > /dev/null 2>&1; then
+        pid=$(ss -xlp 2>/dev/null | awk -v s="$sock." '
+            index($5, s) == 1 && match($0, /pid=[0-9]+/) { print substr($0, RSTART + 4, RLENGTH - 4) }')
+        if [ -n "$pid" ]; then
+            kill -KILL "$pid" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$sock"
 }
 
 clean_local_sockets() {
@@ -54,19 +105,38 @@ clean_local_sockets() {
         return 0
     fi
 
-    local removed=0
+    local removed=0 rc
     for sock in "${sockets[@]}"; do
         [ -S "$sock" ] || continue
-        if ssh -O check -S "$sock" x 2>/dev/null; then
-            echo "Live: $sock (leaving it alone)"
-        else
+        rc=0
+        timeout 5 ssh -O check -S "$sock" x > /dev/null 2>&1 || rc=$?
+        if [ "$rc" -eq 124 ]; then
+            echo "Frozen: $sock (master didn't answer; closing)"
+            close_master "$sock"
+            removed=$((removed + 1))
+            continue
+        elif [ "$rc" -ne 0 ]; then
             echo "Stale: $sock (removing)"
             rm -f "$sock"
             removed=$((removed + 1))
+            continue
+        fi
+        # -O check only reached the local master process, so it also passes a
+        # master whose remote end has stalled (suspected, never confirmed, on
+        # 2026-10-15). Open a real session to be sure. Only a timeout counts
+        # as stalled: any other failure isn't evidence against the master.
+        rc=0
+        timeout "$SESSION_PROBE_SECS" ssh -S "$sock" -o ControlMaster=no -o BatchMode=yes x true < /dev/null > /dev/null 2>&1 || rc=$?
+        if [ "$rc" -eq 124 ]; then
+            echo "Stalled: $sock (no session in ${SESSION_PROBE_SECS}s; closing)"
+            close_master "$sock"
+            removed=$((removed + 1))
+        else
+            echo "Live: $sock (leaving it alone)"
         fi
     done
 
-    echo "Done. Removed $removed stale socket(s)."
+    echo "Done. Closed or removed $removed socket(s)."
 }
 
 if [ "${1:-}" = "--vscode" ]; then
