@@ -190,6 +190,10 @@ main() {
             echo "UNREACHABLE -- no fresh login to $host succeeded."
             echo "-> Run check-dev to tell a down VM from a dead link." ;;
     esac
+    # A bottleneck only matters when it costs a connect; on GOOD the hop
+    # table above already shows any loss, and "restart your router" would be
+    # advice to fix something that works.
+    [ "$v" = GOOD ] && at=""
     case "$at" in
         router)   echo "   Bottleneck: your wifi/router or phone hotspot (local). Restart it or move networks." ;;
         internet) echo "   Bottleneck: your internet connection (ISP or mobile data), not $host." ;;
