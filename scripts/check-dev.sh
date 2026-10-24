@@ -14,16 +14,27 @@ TIMEOUT=8
 
 q() { timeout "$TIMEOUT" ssh -o ConnectTimeout=5 -o BatchMode=yes "$HOST" "$1" 2>/dev/null; }
 
-# VS Code Remote-SSH's connect budget is the host's ssh ConnectTimeout + 2s
-# (that overrides remote.SSH.connectTimeout; with no ConnectTimeout set it falls
-# back to that setting's default, 15), and the remote server must also start
-# inside the window. Flag a fresh handshake that uses half the budget -- see
+# vscode-ssh-budget sits next to this script, both in the repo (*.sh) and
+# once installed to ~/.local/bin (no suffix); PATH is the last resort.
+vscode_ssh_budget() {
+    local dir cand
+    dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    for cand in "$dir/vscode-ssh-budget.sh" "$dir/vscode-ssh-budget"; do
+        [ -x "$cand" ] && { "$cand" "$@"; return; }
+    done
+    if command -v vscode-ssh-budget > /dev/null 2>&1; then
+        vscode-ssh-budget "$@"
+        return
+    fi
+    echo "vscode-ssh-budget not found -- re-run install.sh" >&2
+    return 1
+}
+
+# VS Code Remote-SSH's connect budget (vscode-ssh-budget has the derivation),
+# and the remote server must also start inside the window. Flag a fresh
+# handshake that uses half the budget -- see
 # incident-2026-10-12-slow-mobile-link-remote-ssh-timeout.md.
-SSH_CONNECT_TIMEOUT=$(ssh -G "$HOST" 2>/dev/null | awk '$1 == "connecttimeout" { print $2 }')
-case "$SSH_CONNECT_TIMEOUT" in
-    ''|none|*[!0-9]*) VSCODE_BUDGET_SECS=17 ;;
-    *) VSCODE_BUDGET_SECS=$((SSH_CONNECT_TIMEOUT + 2)) ;;
-esac
+VSCODE_BUDGET_SECS=$(vscode_ssh_budget "$HOST") || exit 2
 SLOW_HANDSHAKE_SECS=$(( (VSCODE_BUDGET_SECS + 1) / 2 ))
 
 # Wall-clock seconds for one fresh, non-multiplexed handshake, or empty if it
@@ -179,7 +190,7 @@ fi
 
 if [ "$SLOW_LINK" -eq 1 ]; then
     echo "SIGNATURE: slow client link -- a fresh SSH handshake took ~${FRESH_SECS}s of"
-    echo "VS Code Remote-SSH's ~${VSCODE_BUDGET_SECS}s connect budget (ssh ConnectTimeout + 2s)."
+    echo "VS Code Remote-SSH's ~${VSCODE_BUDGET_SECS}s connect budget."
     echo "dev itself is fine; this is your network. Remote-SSH may time out."
     echo "-> Switch networks if Remote-SSH won't connect. Nothing to run on dev."
     ACTION=1

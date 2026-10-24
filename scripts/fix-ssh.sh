@@ -36,15 +36,20 @@ set -euo pipefail
 # started in this long is stalled.
 SESSION_PROBE_SECS=10
 
-# VS Code Remote-SSH's connect budget: the host's ssh ConnectTimeout + 2s,
-# or 17s when unset. Same derivation as check-dev and check-net.
-vscode_budget_secs() {
-    local ct
-    ct=$(ssh -G "$1" 2>/dev/null | awk '$1 == "connecttimeout" { print $2 }')
-    case "$ct" in
-        ''|none|*[!0-9]*) echo 17 ;;
-        *) echo $(( ct + 2 )) ;;
-    esac
+# vscode-ssh-budget sits next to this script, both in the repo (*.sh) and
+# once installed to ~/.local/bin (no suffix); PATH is the last resort.
+vscode_ssh_budget() {
+    local dir cand
+    dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+    for cand in "$dir/vscode-ssh-budget.sh" "$dir/vscode-ssh-budget"; do
+        [ -x "$cand" ] && { "$cand" "$@"; return; }
+    done
+    if command -v vscode-ssh-budget > /dev/null 2>&1; then
+        vscode-ssh-budget "$@"
+        return
+    fi
+    echo "vscode-ssh-budget not found -- re-run install.sh" >&2
+    return 1
 }
 
 kill_remote_vscode_server() {
@@ -65,7 +70,7 @@ kill_remote_vscode_server() {
       echo "Done."
     '
     secs=$(( SECONDS - start ))
-    budget=$(vscode_budget_secs "$host")
+    budget=$(vscode_ssh_budget "$host") || return 0
     if [ "$secs" -ge $(( (budget + 1) / 2 )) ]; then
         echo ""
         echo "Warning: that login took ${secs}s of VS Code's ${budget}s budget -- your link is the"
