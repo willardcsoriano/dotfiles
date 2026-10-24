@@ -18,6 +18,9 @@ set -uo pipefail
 # (notes/ssh-controlmaster-zombie-after-resume.md); on 2026-10-15 VS Code
 # also timed out five times with a master open, cause unconfirmed.
 #
+# Usually takes 20-40s. On a very slow link each login can take up to the
+# whole window, so a run can stretch to a few minutes.
+#
 #   check-net [host]
 
 PINGS=20
@@ -69,7 +72,8 @@ parse_ping() {
 }
 
 # GOOD | MARGINAL | POOR | UNREACHABLE from the budget, the slowest successful
-# fresh login, and how many of the attempts failed out of how many.
+# fresh login plus VS Code's last measured server setup (0 when none is
+# logged), and how many of the attempts failed out of how many were made.
 verdict() {
     local budget=$1 worst=$2 failed=$3 total=$4
     if [ "$failed" -ge "$total" ]; then echo UNREACHABLE
@@ -77,6 +81,45 @@ verdict() {
     elif [ "$worst" -ge $(( budget / 2 )) ]; then echo MARGINAL
     else echo GOOD
     fi
+}
+
+# One fresh, non-multiplexed login; prints its wall-clock ms, or fails with
+# ssh's last error line on stdout. Tests replace this function.
+login_once() {
+    local host=$1 timeout_s=$2 start end err
+    start=$(date +%s%N)
+    if err=$(timeout "$timeout_s" ssh -o ControlPath=none -o BatchMode=yes "$host" true 2>&1 < /dev/null > /dev/null); then
+        end=$(date +%s%N)
+        echo $(( (end - start) / 1000000 ))
+    else
+        tail -n 1 <<< "${err:-timed out}"
+        return 1
+    fi
+}
+
+# Up to N fresh logins, stopping at the first failure. Each failed login is
+# one more sshd PerSourcePenalties charge against this address (10s when it
+# outlasts LoginGraceTime; enforcement starts once 15s accrue), so a second
+# failure could earn the very refusal being diagnosed -- and it adds nothing:
+# one failure already decides the verdict. Prints
+# "WORST_MS FAILED ATTEMPTED TIMES..." then, on failure, the error line.
+run_logins() {
+    local host=$1 n=$2 timeout_s=$3 i out worst=0 failed=0 tried=0 times="" why=""
+    for (( i = 0; i < n; i++ )); do
+        tried=$(( tried + 1 ))
+        if out=$(login_once "$host" "$timeout_s"); then
+            [ "$out" -gt "$worst" ] && worst=$out
+            times+="$(fmt_secs "$out") "
+        else
+            failed=1
+            times+="failed "
+            why=$out
+            break
+        fi
+    done
+    echo "$worst $failed $tried $times"
+    [ -n "$why" ] && echo "$why"
+    return 0
 }
 
 # First hop at fault, nearest first: router | internet | host | (nothing).
@@ -114,7 +157,7 @@ main() {
     TMP=$(mktemp -d)
     trap 'rm -rf "$TMP"' EXIT
 
-    echo "Checking the link to $host (about 20-40s)..."
+    echo "Checking the link to $host (usually 20-40s)..."
 
     # Pings run concurrently so they measure the same moment.
     [ -n "$gateway" ] && ping -n -q -c "$PINGS" -i 0.2 -w 10 "$gateway" > "$TMP/router" 2>&1 &
@@ -135,6 +178,9 @@ main() {
     # a session (frozen by suspend, or stalled on a dead link). Sessions sent
     # through such a master, VS Code's included, hang until they time out.
     # Send one real session through.
+    # Only a timeout is evidence of a stall, as in fix-ssh: a session that
+    # fails fast (refused, MaxSessions, a dying master) is reported as such
+    # but doesn't get "close it" advice.
     local shared=none rc
     timeout 5 ssh -O check "$host" > /dev/null 2>&1
     rc=$?
@@ -142,42 +188,51 @@ main() {
     if [ "$rc" -eq 124 ]; then
         shared=stalled
     elif [ "$rc" -eq 0 ]; then
-        if timeout "$SHARED_PROBE_SECS" ssh -o ControlMaster=no -o BatchMode=yes "$host" true < /dev/null > /dev/null 2>&1; then
-            shared=working
-        else
-            shared=stalled
-        fi
+        rc=0
+        timeout "$SHARED_PROBE_SECS" ssh -o ControlMaster=no -o BatchMode=yes "$host" true < /dev/null > /dev/null 2>&1 || rc=$?
+        case "$rc" in
+            0)   shared=working ;;
+            124) shared=stalled ;;
+            *)   shared=error ;;
+        esac
     fi
     case "$shared" in
         none)    echo "  shared connection: none open" ;;
         working) echo "  shared connection: working" ;;
         stalled) echo "  shared connection: STALLED (no answer in ${SHARED_PROBE_SECS}s)" ;;
+        error)   echo "  shared connection: a session through it failed (ssh exit $rc), not a stall" ;;
     esac
 
     # Fresh logins bypass any ControlMaster: they measure what a new
     # connection costs, which is what times out when no working master exists.
-    local n start end ms worst=0 failed=0 times="" err why=""
-    for (( n = 0; n < HANDSHAKES; n++ )); do
-        start=$(date +%s%N)
-        if err=$(timeout $(( budget / 1000 + 5 )) ssh -o ControlPath=none -o BatchMode=yes "$host" true 2>&1 < /dev/null > /dev/null); then
-            end=$(date +%s%N)
-            ms=$(( (end - start) / 1000000 ))
-            [ "$ms" -gt "$worst" ] && worst=$ms
-            times+="$(fmt_secs "$ms") "
-        else
-            failed=$(( failed + 1 ))
-            times+="failed "
-            # Last ssh error line, with the address swapped for the host alias.
-            why=$(tail -n 1 <<< "${err:-timed out}")
-            [ -n "$target" ] && why=${why//"$target"/$host}
-        fi
-    done
-    echo "  fresh ssh login: ${times}(Remote-SSH gives up at $(fmt_secs "$budget"))"
-    [ -n "$why" ] && echo "  last failure: $why"
+    local worst failed tried times why="" summary
+    summary=$(run_logins "$host" "$HANDSHAKES" $(( budget / 1000 + 5 )))
+    read -r worst failed tried times <<< "$(head -n 1 <<< "$summary")"
+    if [ "$failed" -gt 0 ]; then
+        why=$(sed -n 2p <<< "$summary")
+        # Swap the address for the host alias.
+        [ -n "$target" ] && why=${why//"$target"/$host}
+    fi
+    echo "  fresh ssh login: ${times} (Remote-SSH gives up at $(fmt_secs "$budget"))"
+    [ -n "$why" ] && echo "  last failure: $why (stopped there; more attempts would only add sshd penalties)"
+
+    # VS Code's window also covers starting its server after the login. Use
+    # the setup time its own log measured on the last successful connect.
+    local setup=0 setup_age last
+    last=$(vscode_ssh_budget --last-connect "$host" 2>/dev/null) || last=""
+    if [ -n "$last" ]; then
+        read -r setup setup_age <<< "$last"
+        if [ "$setup_age" -lt 3600 ]; then setup_age="$(( setup_age / 60 ))m"
+        elif [ "$setup_age" -lt 172800 ]; then setup_age="$(( setup_age / 3600 ))h"
+        else setup_age="$(( setup_age / 86400 ))d"; fi
+        echo "  VS Code server setup: $(fmt_secs "$setup") (measured on its last connect, $setup_age ago)"
+    else
+        echo "  VS Code server setup: not measured yet (no successful connect in its logs); grading the login alone"
+    fi
     echo ""
 
     local v at rl ra il ia hl _
-    v=$(verdict "$budget" "$worst" "$failed" "$HANDSHAKES")
+    v=$(verdict "$budget" $(( worst + setup )) "$failed" "$tried")
     read -r rl ra _ <<< "$r"
     read -r il ia _ <<< "$i"
     read -r hl _ <<< "$h"
@@ -186,6 +241,10 @@ main() {
     if [ "$shared" = stalled ]; then
         echo "STALLED SHARED CONNECTION -- VS Code's connects go through it and hang until they time out."
         echo "-> ssh -O exit $host    (closes it; the next connect opens a fresh one)"
+        echo ""
+    elif [ "$shared" = error ]; then
+        echo "SHARED CONNECTION REFUSED A SESSION -- it answered, so it isn't stalled, but VS Code's"
+        echo "connects go through it too. If Remote-SSH fails: ssh -O exit $host"
         echo ""
     fi
     case "$v" in
@@ -215,7 +274,7 @@ main() {
         echo "   Don't run 'fix-ssh --vscode': $host isn't the problem, and it makes the next connect slower."
     fi
 
-    [ "$v" = GOOD ] && [ "$shared" != stalled ]
+    [ "$v" = GOOD ] && [ "$shared" != stalled ] && [ "$shared" != error ]
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

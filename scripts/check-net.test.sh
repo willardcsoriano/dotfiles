@@ -57,5 +57,42 @@ check "" "$(parse_ping <<'EOF'
 EOF
 )" "no replies"
 
+# run_logins stops at the first failure (#55): a stub login_once plays back
+# a script of results and counts how often it was called.
+CALLS_FILE=$(mktemp)
+trap 'rm -f "$CALLS_FILE"' EXIT
+PLAN=()
+login_once() {
+    local n
+    n=$(( $(wc -l < "$CALLS_FILE") ))
+    echo x >> "$CALLS_FILE"
+    case "${PLAN[$n]}" in
+        fail) echo "Connection timed out during banner exchange"; return 1 ;;
+        *)    echo "${PLAN[$n]}" ;;
+    esac
+}
+logins() { : > "$CALLS_FILE"; PLAN=("$@"); run_logins dev 3 67; }
+calls() { wc -l < "$CALLS_FILE" | tr -d ' '; }
+
+out=$(logins 2300 2400 2200)
+check "2400 0 3" "$(head -n 1 <<< "$out" | cut -d' ' -f1-3)" "three good logins: worst, no failure, three tried"
+check 3 "$(calls)" "  ...all three attempted"
+
+out=$(logins fail 2000 2000)
+check "0 1 1" "$(head -n 1 <<< "$out" | cut -d' ' -f1-3)" "first login fails: stop after one"
+check 1 "$(calls)" "  ...only one sshd penalty risked"
+check "Connection timed out during banner exchange" "$(sed -n 2p <<< "$out")" "  ...error line passed on"
+check UNREACHABLE "$(verdict 62000 0 1 1)" "  ...which grades UNREACHABLE"
+
+out=$(logins 3000 fail 2000)
+check "3000 1 2" "$(head -n 1 <<< "$out" | cut -d' ' -f1-3)" "second login fails: stop after two"
+check 2 "$(calls)" "  ...third never attempted"
+check POOR "$(verdict 62000 3000 1 2)" "  ...which grades POOR"
+
+# Measured server setup counts against the window (#55): the 2026-10-14
+# car trip's 16.2s login plus a ~5s setup could never fit 17s.
+check POOR     "$(verdict 17000 $(( 16200 + 5000 )) 0 3)" "slow login plus setup past the window"
+check GOOD     "$(verdict 62000 $(( 19700 + 6620 )) 0 3)" "2026-10-24: 19.7s login + 6.6s setup is under half of 62s"
+check MARGINAL "$(verdict 62000 $(( 24400 + 6620 )) 0 3)" "login + setup at half the window is marginal"
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
