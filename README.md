@@ -46,7 +46,7 @@ Turns on VS Code's own reconnect handling for Remote-SSH sessions instead of lea
 
 ### SSH client defaults
 
-Shared `Host *` defaults live in [`ssh/defaults.conf`](ssh/defaults.conf): keep-alives, `ConnectionAttempts 5`, `ControlMaster`, and `ConnectTimeout 30`. That last one matters for VS Code too, because Remote-SSH uses it + 2s as its whole connect budget (32s). It was raised from 15 after fresh logins over lossy mobile data took up to 18.3s. The cost: `ssh` to a host that silently drops connections takes longer to give up.
+Shared `Host *` defaults live in [`ssh/defaults.conf`](ssh/defaults.conf): keep-alives, `ConnectionAttempts 5`, `ControlMaster`, and `ConnectTimeout 30`. That last one was raised from 15 after fresh logins over lossy mobile data took up to 18.3s. It applies to plain `ssh` only: VS Code Remote-SSH doesn't follow `Include`, so it never sees this file, and it passes its own `-o ConnectTimeout` from `remote.SSH.connectTimeout` (see the VS Code section above). The cost: `ssh` to a host that silently drops connections takes longer to give up.
 
 - Installed to `~/.ssh/config.d/dotfiles-defaults.conf` and included at the **end** of `~/.ssh/config`, behind a `Match all`. ssh keeps the first value it finds, so any host-specific setting above it (or in an included file such as `config.local`) still wins.
 - Idempotent: the `Include` is appended once. An existing `~/.ssh/config` is never rewritten, only appended to.
