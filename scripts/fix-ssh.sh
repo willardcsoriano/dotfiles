@@ -116,10 +116,10 @@ clean_local_sockets() {
             removed=$((removed + 1))
             continue
         fi
-        # -O check only reached the local master process. A master stalled on
-        # a lossy link still passes it while every session through it hangs
-        # (2026-10-15), so open a real one. Only a timeout counts as stalled:
-        # any other failure isn't evidence against the master.
+        # -O check only reached the local master process, so it also passes a
+        # master whose remote end has stalled (suspected, never confirmed, on
+        # 2026-10-15). Open a real session to be sure. Only a timeout counts
+        # as stalled: any other failure isn't evidence against the master.
         rc=0
         timeout "$SESSION_PROBE_SECS" ssh -S "$sock" -o ControlMaster=no -o BatchMode=yes x true < /dev/null > /dev/null 2>&1 || rc=$?
         if [ "$rc" -eq 124 ]; then
