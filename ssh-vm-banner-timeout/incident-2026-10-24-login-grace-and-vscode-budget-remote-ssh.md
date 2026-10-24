@@ -82,7 +82,15 @@ That window covers the whole connect, not just ssh. At 21:42 the ssh login took 
 - **Tools.** Run from the repo: `check-net` reports "Remote-SSH gives up at 62.0s" and GOOD on the recovered link (33% loss to `dev`, logins 4.5–6.5 s). With the helper removed from reach, it exits 2 with `vscode-ssh-budget not found`. Plain `fix-ssh` left the live master alone.
 - `shellcheck` 0.10.0 is clean on every changed script. `check-net.test.sh` and `vscode-ssh-budget.test.sh` both pass.
 
-## Open items
+## Follow-ups (closed 2026-10-24)
 
-- **The route to `dev` itself.** 33–51% loss on the last hop while the internet was clean. That's the same destination-specific pattern as 2026-08-12 and 2026-08-24, and nothing on our side can fix the route. mosh would ride it out for terminal work. It still needs UDP 60000–61000 opened in UFW and in the Hetzner Cloud Firewall, which waits for an explicit go-ahead.
-- **`check-dev` slice-ceiling false alarm.** It fired twice during this incident (slice at 96%, PSI 0%) and recommended `fix-ssh --vscode`, which would have killed the live session. Fixed in dotfiles#49.
+- **The route to `dev`.** Re-measured after the fixes. Ping loss to `dev` is bursty, varying from 0% to 20% between runs at every rate tried (0.2 s, 0.5 s and 1 s intervals), while the internet hop stays at 0%. A 25 MB transfer over ssh saw 0 TCP retransmits out of 807 segments, and fresh logins took 2.3–3.8 s. ICMP to `dev` overstates what TCP experiences. Nothing on the client or `dev` side can change the route, and the timers above now tolerate it. mosh was declined: the current setup stays as it is.
+- **`check-dev` slice-ceiling false alarm.** Fixed in dotfiles#49. dotfiles#57 then judges the slice by its own cgroup PSI and reports an unreadable PSI as unknown rather than idle.
+- **`check-net`** (dotfiles#55):
+  - It stops at the first failed login, so one run can cost at most one `PerSourcePenalties` charge, which stays below the 15 s enforcement minimum.
+  - Only a timeout counts as a stalled shared connection.
+  - It grades the worst login plus VS Code's measured server setup. The 22:58 connect spent 6.6 s on setup after a 14.2 s login.
+- **`vscode-ssh-budget`** (dotfiles#56):
+  - It evaluates `Match` the way the extension does, read from `extension.js` 0.128.0, including case-sensitive directive names and `?` matching zero or one character.
+  - It checks itself against the extension's own logged timeout.
+- **Commit messages** `4e6669d` and `511701e` overstated the 10-15 stalled-master cause. They now carry correcting git notes (`git log` shows them, from `refs/notes/commits`).
