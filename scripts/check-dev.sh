@@ -14,20 +14,47 @@ TIMEOUT=8
 
 q() { timeout "$TIMEOUT" ssh -o ConnectTimeout=5 -o BatchMode=yes "$HOST" "$1" 2>/dev/null; }
 
-# memory_signature SWAP_PCT AVAIL_PCT PSI_SOME60 SLICE_PCT -> pressure | idle | ok
+# memory_signature SWAP_PCT AVAIL_PCT SYS_PSI SLICE_PCT SLICE_PSI
+#   -> pressure | idle | unknown | ok
 # Full swap or a slice at its MemoryHigh ceiling is only pressure when memory
 # is actually short: RAM nearly gone, or tasks stalling on memory (PSI). Swap
 # fills with paged-out idle processes, and the slice's MemoryCurrent counts
 # reclaimable page cache, so a busy slice sits near its ceiling in normal use
-# (dotfiles#28, #49). "idle" = near a limit with nothing stalling. An
-# unreadable PSI counts as 0, the same as the swap check always has.
+# (dotfiles#28, #49). Each limit is judged by the stall it can cause: swap by
+# the system-wide PSI, the slice by its own cgroup PSI (the slice can be
+# throttled at MemoryHigh while the host as a whole is fine).
+# "idle" = near a limit with nothing stalling. An EMPTY (unreadable) PSI is not
+# 0: without it, "nothing stalling" is unproven, so a near limit that low RAM
+# doesn't already show as short is "unknown", never "idle".
+# Precedence: pressure > unknown > idle > ok.
 memory_signature() {
-    local swap=$1 avail=$2 psi=${3:-0} slice=$4 short=0 full=0
-    { [ "$avail" -lt 15 ] || [ "$psi" -ge 5 ]; } && short=1
-    { [ "$swap" -ge 80 ] || [ "$slice" -ge 90 ]; } && full=1
-    if [ "$full" -eq 1 ] && [ "$short" -eq 1 ]; then echo pressure
-    elif [ "$full" -eq 1 ]; then echo idle
+    local swap=$1 avail=$2 sys_psi=$3 slice=$4 slice_psi=$5
+    local swap_near=0 slice_near=0 a b
+    [ "$swap" -ge 80 ] && swap_near=1
+    [ "$slice" -ge 90 ] && slice_near=1
+    a=$(_limit_state "$swap_near" "$avail" "$sys_psi")
+    b=$(_limit_state "$slice_near" "$avail" "$slice_psi")
+    if [ "$a" = pressure ] || [ "$b" = pressure ]; then echo pressure
+    elif [ "$a" = unknown ] || [ "$b" = unknown ]; then echo unknown
+    elif [ "$a" = idle ] || [ "$b" = idle ]; then echo idle
     else echo ok
+    fi
+}
+
+# _limit_state NEAR(0|1) AVAIL_PCT PSI -> pressure | idle | unknown | ok
+# "short" = AVAIL < 15, or PSI >= 5. PSI `some avg60` is the share of the last
+# 60 s in which at least one task waited on memory: ~0 on a healthy host, and
+# MemoryHigh throttling or real thrashing push it well above. 5% (3 s/min)
+# separates sustained stalls from momentary reclaim. No recorded incident
+# captured PSI under real pressure, so 5 is reasoned, not data-tuned: record
+# readings in future incident write-ups and retune.
+_limit_state() {
+    local near=$1 avail=$2 psi=$3
+    [ "$near" -eq 1 ] || { echo ok; return; }
+    if [ "$avail" -lt 15 ]; then echo pressure
+    elif [ -z "$psi" ]; then echo unknown
+    elif [ "$psi" -ge 5 ]; then echo pressure
+    else echo idle
     fi
 }
 
@@ -122,6 +149,10 @@ MEM_TOTAL=$(q "free -m | awk '/Mem:/{print \$2}'")
 MEM_AVAIL=$(q "free -m | awk '/Mem:/{print \$7}'")
 # Share of the last 60s some task stalled on memory (PSI). Integer part only.
 PSI_SOME60=$(q "awk -F'[ =]' '/^some/{print int(\$5)}' /proc/pressure/memory")
+# Same, for the slice's own cgroup: MemoryHigh throttling shows here even when
+# the system-wide figure is calm.
+SLICE_PSI_FILE=/sys/fs/cgroup/user.slice/user-1000.slice/memory.pressure
+SLICE_PSI60=$(q "awk -F'[ =]' '/^some/{print int(\$5)}' $SLICE_PSI_FILE")
 SWAP_USED=$(q "free -m | awk '/Swap:/{print \$3}'")
 SWAP_TOTAL=$(q "free -m | awk '/Swap:/{print \$2}'")
 SLICE_CUR=$(q "systemctl show user-1000.slice -p MemoryCurrent --value")
@@ -153,7 +184,7 @@ AVAIL_PCT=100
 
 SLICE_PCT=0
 [ "${SLICE_HIGH:-0}" -gt 0 ] 2>/dev/null && SLICE_PCT=$((SLICE_CUR * 100 / SLICE_HIGH))
-MEMORY=$(memory_signature "$SWAP_PCT" "$AVAIL_PCT" "${PSI_SOME60:-0}" "$SLICE_PCT")
+MEMORY=$(memory_signature "$SWAP_PCT" "$AVAIL_PCT" "$PSI_SOME60" "$SLICE_PCT" "$SLICE_PSI60")
 
 echo ""
 OLDEST_HOURS=0
@@ -164,6 +195,7 @@ echo "  RAM used                : ${MEM_USED}Mi / ${MEM_TOTAL}Mi"
 echo "  RAM available            : ${MEM_AVAIL}Mi (${AVAIL_PCT}%)"
 echo "  swap used                : ${SWAP_USED}Mi / ${SWAP_TOTAL}Mi (${SWAP_PCT}%)"
 echo "  memory stall (PSI 60s)   : ${PSI_SOME60:-?}%"
+echo "  slice stall (PSI 60s)    : ${SLICE_PSI60:-?}%"
 echo "  user-1000.slice          : ${SLICE_PCT}% of MemoryHigh ceiling"
 echo "  load average (1m)        : $LOAD1"
 echo "  open vscode windows      : ${EXTHOST_COUNT:-0} (extensionHost count)"
@@ -186,6 +218,21 @@ if [ "$MEMORY" = idle ] && [ "$SLICE_PCT" -ge 90 ]; then
     echo "NOTE: user-1000.slice is at ${SLICE_PCT}% of its MemoryHigh ceiling, but nothing is"
     echo "stalling on memory -- the kernel is reclaiming page cache there, which is normal."
     echo "Nothing to run."
+fi
+
+# unknown counts as a finding (exit 1): a limit is near and the PSI reading that
+# would tell idle from pressure is missing, so a human should look. No fix-ssh
+# advice, since nothing is shown to be wrong.
+if [ "$MEMORY" = unknown ]; then
+    UNREADABLE=""
+    [ "$SWAP_PCT" -ge 80 ] && [ -z "$PSI_SOME60" ] && UNREADABLE="system-wide (/proc/pressure/memory)"
+    if [ "$SLICE_PCT" -ge 90 ] && [ -z "$SLICE_PSI60" ]; then
+        UNREADABLE="${UNREADABLE:+$UNREADABLE and }user-1000.slice's own ($SLICE_PSI_FILE)"
+    fi
+    echo "NOTE: a memory limit is near, but the $UNREADABLE memory pressure (PSI) reading"
+    echo "couldn't be read, so this can't tell idle from pressure. Check by hand:"
+    echo "-> ssh $HOST 'cat /proc/pressure/memory $SLICE_PSI_FILE'"
+    ACTION=1
 fi
 
 if [ "$MEMORY" = pressure ]; then
