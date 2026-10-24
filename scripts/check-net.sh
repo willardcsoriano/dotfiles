@@ -220,6 +220,9 @@ main() {
     # the setup time its own log measured on the last successful connect.
     local setup=0 setup_age last
     last=$(vscode_ssh_budget --last-connect "$host" 2>/dev/null) || last=""
+    # Only "SETUP_MS AGE_SECS" counts: an older vscode-ssh-budget without
+    # --last-connect prints a lone budget number instead.
+    [[ "$last" =~ ^[0-9]+\ [0-9]+$ ]] || last=""
     if [ -n "$last" ]; then
         read -r setup setup_age <<< "$last"
         if [ "$setup_age" -lt 3600 ]; then setup_age="$(( setup_age / 60 ))m"
@@ -227,7 +230,7 @@ main() {
         else setup_age="$(( setup_age / 86400 ))d"; fi
         echo "  VS Code server setup: $(fmt_secs "$setup") (measured on its last connect, $setup_age ago)"
     else
-        echo "  VS Code server setup: not measured yet (no successful connect in its logs); grading the login alone"
+        echo "  VS Code server setup: not measured (no successful connect logged, or vscode-ssh-budget predates --last-connect); grading the login alone"
     fi
     echo ""
 
