@@ -14,6 +14,28 @@ TIMEOUT=8
 
 q() { timeout "$TIMEOUT" ssh -o ConnectTimeout=5 -o BatchMode=yes "$HOST" "$1" 2>/dev/null; }
 
+# memory_signature SWAP_PCT AVAIL_PCT PSI_SOME60 SLICE_PCT -> pressure | idle | ok
+# Full swap or a slice at its MemoryHigh ceiling is only pressure when memory
+# is actually short: RAM nearly gone, or tasks stalling on memory (PSI). Swap
+# fills with paged-out idle processes, and the slice's MemoryCurrent counts
+# reclaimable page cache, so a busy slice sits near its ceiling in normal use
+# (dotfiles#28, #49). "idle" = near a limit with nothing stalling. An
+# unreadable PSI counts as 0, the same as the swap check always has.
+memory_signature() {
+    local swap=$1 avail=$2 psi=${3:-0} slice=$4 short=0 full=0
+    { [ "$avail" -lt 15 ] || [ "$psi" -ge 5 ]; } && short=1
+    { [ "$swap" -ge 80 ] || [ "$slice" -ge 90 ]; } && full=1
+    if [ "$full" -eq 1 ] && [ "$short" -eq 1 ]; then echo pressure
+    elif [ "$full" -eq 1 ]; then echo idle
+    else echo ok
+    fi
+}
+
+# Tests source this file for memory_signature only.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0
+fi
+
 # vscode-ssh-budget sits next to this script, both in the repo (*.sh) and
 # once installed to ~/.local/bin (no suffix); PATH is the last resort.
 vscode_ssh_budget() {
@@ -129,16 +151,9 @@ SWAP_PCT=0
 AVAIL_PCT=100
 [ "${MEM_TOTAL:-0}" -gt 0 ] 2>/dev/null && AVAIL_PCT=$((MEM_AVAIL * 100 / MEM_TOTAL))
 
-# Full swap alone isn't pressure: long-idle processes (e.g. tmux-hosted agent
-# sessions) get paged out while RAM stays available and nothing stalls. Only
-# treat it as pressure when RAM is also short or tasks are stalling on memory.
-SWAP_PRESSURE=0
-if [ "$SWAP_PCT" -ge 80 ] && { [ "$AVAIL_PCT" -lt 15 ] || [ "${PSI_SOME60:-0}" -ge 5 ]; }; then
-    SWAP_PRESSURE=1
-fi
-
 SLICE_PCT=0
 [ "${SLICE_HIGH:-0}" -gt 0 ] 2>/dev/null && SLICE_PCT=$((SLICE_CUR * 100 / SLICE_HIGH))
+MEMORY=$(memory_signature "$SWAP_PCT" "$AVAIL_PCT" "${PSI_SOME60:-0}" "$SLICE_PCT")
 
 echo ""
 OLDEST_HOURS=0
@@ -162,13 +177,18 @@ if [ "${DOCKER_RESTARTS:-0}" -gt 0 ] 2>/dev/null; then
     ACTION=1
 fi
 
-if [ "$SWAP_PCT" -ge 80 ] && [ "$SWAP_PRESSURE" -eq 0 ] && [ "$SLICE_PCT" -lt 90 ]; then
+if [ "$MEMORY" = idle ] && [ "$SWAP_PCT" -ge 80 ]; then
     echo "NOTE: swap is ${SWAP_PCT}% full, but ${AVAIL_PCT}% of RAM is available and nothing is"
     echo "stalling on memory -- idle processes paged out, not pressure. Headroom is thin, though:"
     echo "-> see what's holding it: ssh $HOST 'tmux ls' (long-idle agent sessions are the usual cause)."
 fi
+if [ "$MEMORY" = idle ] && [ "$SLICE_PCT" -ge 90 ]; then
+    echo "NOTE: user-1000.slice is at ${SLICE_PCT}% of its MemoryHigh ceiling, but nothing is"
+    echo "stalling on memory -- the kernel is reclaiming page cache there, which is normal."
+    echo "Nothing to run."
+fi
 
-if [ "$SWAP_PRESSURE" -eq 1 ] || [ "$SLICE_PCT" -ge 90 ]; then
+if [ "$MEMORY" = pressure ]; then
     echo "SIGNATURE: swap/memory ceiling pressure."
     if [ "$OLDEST_HOURS" -ge 12 ] 2>/dev/null; then
         echo "Oldest session is ~${OLDEST_HOURS}h old (well past a normal work session) -- this"
