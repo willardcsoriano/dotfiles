@@ -1,0 +1,1 @@
+Correction (2026-10-24): this message says the reused master "was itself stalled". That was a hypothesis and was never confirmed. A command-line session through the same master succeeded seconds after a VS Code failure. The retry advice stands on its own. See ssh-vm-banner-timeout/incident-2026-10-14-lossy-link-stalled-master-remote-ssh.md and #44.
